@@ -7,12 +7,36 @@ This script demonstrates how to use GitPython and PyGithub to:
 - Interact with GitHub API (create issues, manage repositories)
 
 Requirements:
-    pip install GitPython PyGithub
+    pip install GitPython PyGithub python-dotenv
 
-Usage:
-    1. Set the GITHUB_TOKEN environment variable (optional for some operations).
-    2. Run the script: python git_github_starter.py
-    3. The script will prompt you for the local repository path and GitHub repository name.
+Setup & Usage:
+
+1.  **GitHub Token (`GITHUB_TOKEN`):**
+    *   This token is required for GitHub API operations (e.g., creating issues, getting repo info).
+    *   Set it as an environment variable OR create a `.env` file in the script's directory
+      with the line: `GITHUB_TOKEN=your_personal_access_token`
+    *   If not set, GitHub operations will be skipped.
+
+2.  **Running the Script:**
+    `python git_github_starter.py [options]`
+
+3.  **Repository Information (Local Path & GitHub Repo Name):**
+    The script determines the local repository path and GitHub repository name using the following order of precedence:
+
+    *   **Command-Line Arguments (Highest Precedence):**
+        *   `--local-path PATH`: Specify the path to your local Git repository.
+        *   `--github-repo USER/REPO`: Specify the GitHub repository name (e.g., `username/repository`).
+        If a command-line argument is provided for a piece of information, it will be used.
+
+    *   **Automatic Detection (for GitHub Repo Name only):**
+        *   If `--github-repo` is NOT provided, the script will attempt to automatically determine
+          the GitHub repository name from the 'origin' remote URL of the local Git repository
+          (specified by `--local-path` or prompted).
+
+    *   **Interactive Prompts (Lowest Precedence):**
+        *   If the local path is not provided via `--local-path`, the script will prompt you to enter it.
+        *   If the GitHub repository name is not provided via `--github-repo` AND cannot be
+          auto-detected, the script will prompt you to enter it.
 """
 
 from git import Repo, InvalidGitRepositoryError
@@ -20,8 +44,14 @@ from github import Github, GithubException
 import os
 import sys
 import argparse
+import re # Added re import
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if it exists
+load_dotenv()
 
 # --- Configuration ---
+# GITHUB_TOKEN can be set as an environment variable or in a .env file.
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 def check_git_status_and_commit(repo_path, commit_message="Automated commit from script"):
@@ -155,7 +185,7 @@ def github_repo_exists(github_token, repo_name):
         repo_name (str): The full name of the repository (e.g., "username/repo").
 
     Returns:
-        bool: True if the repository exists and is accessible. 
+        bool: True if the repository exists and is accessible.
               Also returns True if `github_token` is not provided (skipping the check).
               Returns False if the repository is not found, or another API error occurs.
     """
@@ -180,28 +210,110 @@ def github_repo_exists(github_token, repo_name):
         print(f"An unexpected error occurred while checking GitHub repository '{repo_name}': {e}")
         return False
 
+def get_github_repo_from_local(local_repo_path):
+    """
+    Attempts to determine the GitHub repository name (username/reponame)
+    from the local Git repository's 'origin' remote URL.
+
+    Args:
+        local_repo_path (str): Path to the local Git repository.
+
+    Returns:
+        str: The 'username/reponame' if successfully extracted, otherwise None.
+    """
+    from git import Repo # Local import for self-containment
+    try:
+        repo = Repo(local_repo_path)
+        if not repo.remotes:
+            print("Info: No remotes found in the local repository.")
+            return None
+
+        origin = None
+        for remote in repo.remotes:
+            if remote.name == "origin":
+                origin = remote
+                break
+
+        if not origin:
+            print("Info: No remote named 'origin' found.")
+            return None
+
+        url = origin.url
+        # Regex to capture username/reponame from SSH or HTTPS URLs
+        # Handles URLs like:
+        # - git@github.com:username/reponame.git
+        # - https://github.com/username/reponame.git
+        # - git@github.com:username/reponame
+        # - https://github.com/username/reponame
+        match = re.search(r'(?:[:/])([\w.-]+/[\w.-]+?)(?:\.git)?$', url)
+        if match:
+            return match.group(1)
+        else:
+            print(f"Info: Could not parse GitHub repository name from URL: {url}")
+            return None
+    except InvalidGitRepositoryError: # Should be caught by is_valid_git_repo earlier
+        print(f"Error: {local_repo_path} is not a valid Git repository (should have been caught earlier).")
+        return None
+    except Exception as e:
+        print(f"Error extracting GitHub repo name from local config: {e}")
+        return None
+
 def main():
     """
     Main function to orchestrate Git and GitHub operations.
-    Prompts user for repository paths, validates them, and then performs operations.
+    Orchestrates the script's operations:
+    1. Parses command-line arguments.
+    2. Checks for the GITHUB_TOKEN.
+    3. Determines the local repository path (from args or prompt).
+    4. Validates the local repository path.
+    5. Determines the GitHub repository name (from args, auto-detection, or prompt).
+    6. Validates the GitHub repository name and its accessibility.
+    7. Executes Git operations (status, commit, push if changes).
+    8. Executes GitHub API operations (get info, create issue if changes and token available).
     """
-    
-    # Check for GITHUB_TOKEN environment variable.
+    parser = argparse.ArgumentParser(description="Automate Git and GitHub operations.")
+    parser.add_argument("--local-path", help="Path to the local Git repository.")
+    parser.add_argument("--github-repo", help="GitHub repository name (e.g., username/repo).")
+    args = parser.parse_args()
+
+    # Check for GITHUB_TOKEN environment variable (loaded from .env or environment).
     if not GITHUB_TOKEN:
         print("Warning: GITHUB_TOKEN environment variable not set. GitHub API operations will be skipped.")
-    
-    # Note: Validations for local_repo_path and github_repo_name are now done
-    # immediately after user input, using is_valid_git_repo and github_repo_exists.
     
     print("=== Git and GitHub Automation Script ===")
     print()
 
-    local_repo_path_input = input("Enter the local Git repository path: ")
+    # Determine local repository path: command-line arg > prompt.
+    if args.local_path:
+        local_repo_path_input = args.local_path
+        print(f"Using local path from command line: {local_repo_path_input}")
+    else:
+        local_repo_path_input = input("Enter the local Git repository path: ")
+
+    # Validate local repository path.
     if not is_valid_git_repo(local_repo_path_input):
         print("Exiting script due to invalid local repository path.")
         sys.exit(1)
-        
-    github_repo_name_input = input("Enter the GitHub repository name (e.g., username/repo): ")
+
+    # Determine GitHub repository name: command-line arg > auto-detection > prompt.
+    if args.github_repo:
+        github_repo_name_input = args.github_repo
+        print(f"Using GitHub repo name from command line: {github_repo_name_input}")
+    else:
+        print("Attempting to automatically determine GitHub repository name from local git config...")
+        github_repo_name_input = get_github_repo_from_local(local_repo_path_input)
+        if github_repo_name_input:
+            print(f"Auto-detected GitHub repository name: {github_repo_name_input}")
+        else:
+            print("Could not auto-detect GitHub repository name.")
+            github_repo_name_input = input("Enter the GitHub repository name (e.g., username/repo): ")
+
+    # Ensure GitHub repository name is provided.
+    if not github_repo_name_input:
+        print("Error: GitHub repository name is required.")
+        sys.exit(1)
+
+    # Validate GitHub repository existence and accessibility.
     if not github_repo_exists(GITHUB_TOKEN, github_repo_name_input):
         print("Exiting script due to invalid GitHub repository or access issues.")
         sys.exit(1)
