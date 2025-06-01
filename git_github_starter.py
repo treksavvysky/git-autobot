@@ -54,30 +54,49 @@ load_dotenv()
 # GITHUB_TOKEN can be set as an environment variable or in a .env file.
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-def check_git_status_and_commit(repo_path, commit_message="Automated commit from script"):
+def check_git_status_and_commit(repo_path):
     """
-    Check Git status and commit changes if any exist.
-    
+    Checks the Git status of the repository at `repo_path`.
+    If changes are detected, it displays the status, then prompts the user
+    for confirmation (y/n) to proceed with staging and committing.
+    If confirmed, it prompts for a custom commit message. If the user provides
+    an empty commit message, a default message is used.
+    Finally, it stages all changes, commits them with the provided or default
+    message, and pushes them to the 'origin' remote.
+
     Args:
-        repo_path (str): Path to the local Git repository
-        commit_message (str): Commit message to use
+        repo_path (str): Path to the local Git repository.
     
     Returns:
-        bool: True if changes were committed and pushed, False otherwise
+        bool: True if changes were successfully committed and pushed,
+              False otherwise (e.g., no changes, commit aborted by user, or an error occurred).
     """
     try:
         repo = Repo(repo_path)
         
         # Check if there are changes to commit
         if repo.is_dirty(untracked_files=True):
-            print("Git Status:")
-            print(repo.git.status())
-            print("-" * 50)
+            print("\n--- Git Status ---")
+            status_output = repo.git.status()
+            print(status_output)
+            print("--- End Git Status ---\n")
+
+            confirmation = input("Do you want to stage and commit these changes? (y/n): ").lower()
+            if confirmation != 'y':
+                print("Commit aborted by user.")
+                return False
             
-            # Add and commit changes
+            # Add all changes (staging)
             repo.git.add(all=True)
-            repo.index.commit(commit_message)
-            print(f"Changes committed: {commit_message}")
+
+            # Prompt for user-defined commit message
+            user_commit_message = input("Enter commit message: ")
+            if not user_commit_message.strip():
+                user_commit_message = "Automated commit from script (user approved, no message provided)"
+                print(f"Empty commit message provided. Using default: '{user_commit_message}'")
+
+            repo.index.commit(user_commit_message)
+            print(f"Changes committed with message: '{user_commit_message}'")
             
             # Push changes
             origin = repo.remote(name='origin')
