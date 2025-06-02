@@ -417,5 +417,455 @@ class TestMainFunction(unittest.TestCase):
 
 # More test classes will be added here for other functionalities
 
+class TestGitHubRepoCreationAndRemoteSetup(unittest.TestCase):
+    def setUp(self):
+        self.mock_github_class = patch('git_github_starter.Github').start()
+        self.mock_gh_instance = self.mock_github_class.return_value
+        self.mock_user = MagicMock()
+        self.mock_gh_instance.get_user.return_value = self.mock_user
+
+        self.mock_repo_class = patch('git_github_starter.Repo').start()
+        self.mock_repo_instance = self.mock_repo_class.return_value
+        
+        # Mock sys.exit to prevent tests from stopping prematurely
+        self.mock_sys_exit = patch('sys.exit').start()
+        # Mock print to suppress output unless specifically desired
+        self.mock_print = patch('builtins.print').start()
+
+        # Mock GITHUB_TOKEN if it's checked directly
+        patch.dict(ggs.os.environ, {"GITHUB_TOKEN": "test_token"}, clear=True).start()
+        ggs.GITHUB_TOKEN = "test_token" # Ensure module's global is also set for the test
+
+
+    def tearDown(self):
+        patch.stopall()
+        ggs.GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") # Restore original GITHUB_TOKEN logic
+
+    def test_create_github_repository_success(self):
+        mock_new_repo = MagicMock()
+        mock_new_repo.html_url = "http://github.com/user/newrepo"
+        mock_new_repo.full_name = "user/newrepo"
+        self.mock_user.create_repo.return_value = mock_new_repo
+        self.mock_user.login = "user"
+
+        repo_obj = ggs.create_github_repository("test_token", "user/newrepo", description="A new repo", private=True)
+
+        self.mock_user.create_repo.assert_called_once_with(
+            "newrepo", description="A new repo", private=True, auto_init=False
+        )
+        self.assertEqual(repo_obj, mock_new_repo)
+        self.mock_print.assert_any_call(f"Successfully created GitHub repository: {mock_new_repo.html_url}")
+
+    def test_create_github_repository_api_error_already_exists(self):
+        self.mock_user.create_repo.side_effect = ggs.GithubException(status=422, data={"message": "Repo already exists"}, headers=None)
+        self.mock_user.login = "user"
+        
+        repo_obj = ggs.create_github_repository("test_token", "user/existingrepo")
+        
+        self.assertIsNone(repo_obj)
+        self.mock_print.assert_any_call(f"GitHub API error during repository creation for 'user/existingrepo': 422 {{'message': 'Repo already exists'}}")
+        self.mock_print.assert_any_call("This might mean the repository already exists or the name is invalid.")
+
+    def test_create_github_repository_username_mismatch_warning(self):
+        self.mock_user.login = "actual_user"
+        mock_new_repo = MagicMock()
+        mock_new_repo.html_url = "http://github.com/actual_user/repo"
+        self.mock_user.create_repo.return_value = mock_new_repo
+
+        ggs.create_github_repository("test_token", "provided_user/repo")
+        
+        self.mock_print.assert_any_call(f"Warning: Provided username 'provided_user' in 'provided_user/repo' does not match authenticated user 'actual_user'. Repository will be created under 'actual_user'.")
+        self.mock_user.create_repo.assert_called_with("repo", description="", private=False, auto_init=False)
+
+    def test_create_github_repository_no_token(self):
+        repo_obj = ggs.create_github_repository(None, "user/repo")
+        self.assertIsNone(repo_obj)
+        self.mock_print.assert_any_call("Error: GitHub token is required to create a repository.")
+
+    def test_setup_remote_origin_new_remote(self):
+        # Mock remote() to initially raise ValueError, then return the origin mock after creation
+        mock_origin = MagicMock()
+        mock_origin.url = "new_url" # So config_writer can be called on it
+        self.mock_repo_instance.remote.side_effect = [ValueError, mock_origin] # First call fails, second succeeds
+        self.mock_repo_instance.create_remote.return_value = mock_origin
+        
+        # Mock branches/heads
+        mock_branch = MagicMock()
+        mock_branch.name = "main"
+        mock_branch.commit = "some_commit_sha" # Has commits
+        self.mock_repo_instance.heads = [mock_branch] # Make it iterable and indexable
+        self.mock_repo_instance.heads.__getitem__.side_effect = lambda key: mock_branch if key == "main" else (_ for _ in ()).throw(IndexError)
+
+
+        success = ggs.setup_remote_origin("/fake/path", "http://github.com/user/newrepo.git", default_branch_name="main")
+
+        self.assertTrue(success)
+        self.mock_repo_instance.create_remote.assert_called_once_with('origin', "http://github.com/user/newrepo.git")
+        mock_origin.push.assert_called_once_with(refspec="main:main", set_upstream=True)
+
+    def test_setup_remote_origin_existing_remote(self):
+        mock_origin = MagicMock()
+        mock_origin.url = "old_url"
+        # mock_origin.set_url = MagicMock() # set_url is on the remote itself
+        self.mock_repo_instance.remote.return_value = mock_origin
+        
+        # Mock config_writer context manager
+        mock_config_writer = MagicMock()
+        mock_origin.config_writer = mock_config_writer
+        mock_cw_instance = mock_config_writer.__enter__.return_value # what 'cw' becomes
+        
+        mock_branch = MagicMock()
+        mock_branch.name = "main"
+        mock_branch.commit = "some_commit_sha"
+        self.mock_repo_instance.heads = [mock_branch]
+        self.mock_repo_instance.heads.__getitem__.side_effect = lambda key: mock_branch if key == "main" else (_ for _ in ()).throw(IndexError)
+
+
+        success = ggs.setup_remote_origin("/fake/path", "http://github.com/user/updatedrepo.git", default_branch_name="main")
+
+        self.assertTrue(success)
+        self.mock_repo_instance.remote.assert_called_with(name='origin')
+        # self.assertEqual(mock_origin.url, "http://github.com/user/updatedrepo.git") # This is tricky with context manager
+        mock_cw_instance.set.assert_called_once_with("url", "http://github.com/user/updatedrepo.git")
+        mock_origin.push.assert_called_once_with(refspec="main:main", set_upstream=True)
+
+
+    def test_setup_remote_origin_no_commits(self):
+        mock_branch = MagicMock()
+        mock_branch.name = "main"
+        mock_branch.commit = None # No commits on the branch
+        self.mock_repo_instance.heads = [mock_branch]
+        self.mock_repo_instance.heads.__getitem__.side_effect = lambda key: mock_branch if key == "main" else (_ for _ in ()).throw(IndexError)
+
+
+        success = ggs.setup_remote_origin("/fake/path", "http://url.git")
+        self.assertFalse(success)
+        self.mock_print.assert_any_call(f"Error: Branch 'main' in '/fake/path' has no commits. Cannot push.")
+
+    def test_setup_remote_origin_push_error(self):
+        mock_origin = MagicMock()
+        self.mock_repo_instance.remote.return_value = mock_origin
+        mock_origin.push.side_effect = ggs.GitCommandError("push", "failed")
+        
+        mock_branch = MagicMock()
+        mock_branch.name = "main"
+        mock_branch.commit = "some_commit_sha"
+        self.mock_repo_instance.heads = [mock_branch]
+        self.mock_repo_instance.heads.__getitem__.side_effect = lambda key: mock_branch if key == "main" else (_ for _ in ()).throw(IndexError)
+
+
+        success = ggs.setup_remote_origin("/fake/path", "http://url.git")
+        self.assertFalse(success)
+        self.mock_print.assert_any_call("Git command error during remote setup for '/fake/path': Cmd('push') failed: failed")
+
+    # Tests for main() logic related to --create-github-repo
+    @patch('git_github_starter.github_repo_exists')
+    @patch('git_github_starter.create_github_repository')
+    @patch('git_github_starter.setup_remote_origin')
+    @patch('git_github_starter.is_valid_git_repo') # Assume local repo is valid
+    @patch('argparse.ArgumentParser') # To control args
+    def test_main_create_github_repo_success(self, mock_argparse_class, mock_is_valid, mock_setup_remote, mock_create_repo, mock_repo_exists):
+        mock_args = MagicMock(
+            create_github_repo=True, github_repo="user/newrepo", local_path="/fake/path",
+            fetch=False, list_branches=False, checkout=None, create_branch=None, pull=False, # other args
+            list_repos=False, clone_repo=False, repo_name=None, init_repo=False # original other args
+        )
+        mock_argparse_class.return_value.parse_args.return_value = mock_args
+        
+        mock_repo_exists.return_value = False # GitHub repo does not exist
+        mock_created_gh_repo = MagicMock()
+        mock_created_gh_repo.full_name = "user/newrepo"
+        mock_created_gh_repo.clone_url = "http://github.com/user/newrepo.git"
+        mock_create_repo.return_value = mock_created_gh_repo
+        mock_setup_remote.return_value = True
+        mock_is_valid.return_value = (True, False) # Local repo is valid
+
+        # Mock active branch for setup_remote_origin call in main
+        mock_local_repo_instance_for_branch = MagicMock()
+        mock_active_branch = MagicMock()
+        mock_active_branch.name = "main"
+        mock_active_branch.commit = "sha123" # Has a commit
+        mock_local_repo_instance_for_branch.active_branch = mock_active_branch
+        mock_local_repo_instance_for_branch.head.is_valid.return_value = True
+        
+        # When Repo(local_repo_path_input) is called inside main for branch check
+        self.mock_repo_class.return_value = mock_local_repo_instance_for_branch
+
+
+        ggs.main()
+
+        mock_create_repo.assert_called_once_with(ggs.GITHUB_TOKEN, "user/newrepo", description=f"Repository user/newrepo created by git_github_starter.py", private=False)
+        mock_setup_remote.assert_called_once_with("/fake/path", "http://github.com/user/newrepo.git", default_branch_name="main")
+        self.mock_sys_exit.assert_not_called()
+
+
+    @patch('git_github_starter.github_repo_exists')
+    @patch('git_github_starter.create_github_repository')
+    @patch('git_github_starter.is_valid_git_repo')
+    @patch('argparse.ArgumentParser')
+    def test_main_create_github_repo_creation_fails(self, mock_argparse_class, mock_is_valid, mock_create_repo, mock_repo_exists):
+        mock_args = MagicMock(create_github_repo=True, github_repo="user/failrepo", local_path="/fake/path", fetch=False, list_branches=False, checkout=None, create_branch=None, pull=False, list_repos=False, clone_repo=False, repo_name=None, init_repo=False)
+        mock_argparse_class.return_value.parse_args.return_value = mock_args
+        
+        mock_repo_exists.return_value = False
+        mock_create_repo.return_value = None # Creation fails
+        mock_is_valid.return_value = (True, False)
+
+        ggs.main()
+        
+        mock_create_repo.assert_called_once()
+        self.mock_sys_exit.assert_called_once_with(1)
+
+    @patch('git_github_starter.github_repo_exists')
+    @patch('git_github_starter.create_github_repository')
+    @patch('git_github_starter.setup_remote_origin')
+    @patch('git_github_starter.is_valid_git_repo')
+    @patch('argparse.ArgumentParser')
+    def test_main_create_github_repo_setup_remote_fails(self, mock_argparse_class, mock_is_valid, mock_setup_remote, mock_create_repo, mock_repo_exists):
+        mock_args = MagicMock(create_github_repo=True, github_repo="user/remotefail", local_path="/fake/path", fetch=False, list_branches=False, checkout=None, create_branch=None, pull=False, list_repos=False, clone_repo=False, repo_name=None, init_repo=False)
+        mock_argparse_class.return_value.parse_args.return_value = mock_args
+
+        mock_repo_exists.return_value = False
+        mock_created_gh_repo = MagicMock(clone_url="http://url.git", full_name="user/remotefail")
+        mock_create_repo.return_value = mock_created_gh_repo
+        mock_setup_remote.return_value = False # Setup remote fails
+        mock_is_valid.return_value = (True, False)
+        
+        # Mock for active branch check in main
+        mock_local_repo_instance_for_branch = MagicMock()
+        mock_active_branch = MagicMock(name="main", commit="sha123")
+        mock_local_repo_instance_for_branch.active_branch = mock_active_branch
+        mock_local_repo_instance_for_branch.head.is_valid.return_value = True
+        self.mock_repo_class.return_value = mock_local_repo_instance_for_branch
+
+        ggs.main()
+        
+        mock_create_repo.assert_called_once()
+        mock_setup_remote.assert_called_once()
+        self.mock_sys_exit.assert_called_once_with(1)
+
+    @patch('git_github_starter.github_repo_exists')
+    @patch('git_github_starter.is_valid_git_repo')
+    @patch('argparse.ArgumentParser')
+    def test_main_create_github_repo_no_token(self, mock_argparse_class, mock_is_valid, mock_repo_exists):
+        # Temporarily unset GITHUB_TOKEN for this test
+        original_token = ggs.GITHUB_TOKEN
+        ggs.GITHUB_TOKEN = None
+        patch.dict(ggs.os.environ, {"GITHUB_TOKEN": ""}, clear=True).start()
+
+
+        mock_args = MagicMock(create_github_repo=True, github_repo="user/notoken", local_path="/fake/path", fetch=False, list_branches=False, checkout=None, create_branch=None, pull=False, list_repos=False, clone_repo=False, repo_name=None, init_repo=False)
+        mock_argparse_class.return_value.parse_args.return_value = mock_args
+        
+        mock_repo_exists.return_value = False # Repo doesn't exist
+        mock_is_valid.return_value = (True, False)
+
+        ggs.main()
+        
+        self.mock_print.assert_any_call("Error: --create-github-repo requires GITHUB_TOKEN to be set. Exiting.")
+        self.mock_sys_exit.assert_called_once_with(1)
+        
+        ggs.GITHUB_TOKEN = original_token # Restore for other tests
+        patch.stopall() # Stop the os.environ patch specifically for this test
+
+
+class TestGitExtendedOperations(unittest.TestCase):
+    def setUp(self):
+        self.mock_repo_class = patch('git_github_starter.Repo').start()
+        self.mock_repo_instance = self.mock_repo_class.return_value
+        self.mock_origin = MagicMock(name="origin")
+        self.mock_repo_instance.remote.return_value = self.mock_origin
+        
+        self.mock_print = patch('builtins.print').start()
+        self.mock_sys_exit = patch('sys.exit').start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    # Tests for fetch_changes
+    def test_fetch_changes_success(self):
+        mock_fetch_info = [MagicMock(name='origin/main', summary='summary', flags=0)]
+        self.mock_origin.fetch.return_value = mock_fetch_info
+        self.mock_origin.exists.return_value = True
+
+        result = ggs.fetch_changes("/fake/path")
+        self.assertTrue(result)
+        self.mock_origin.fetch.assert_called_once()
+        self.mock_print.assert_any_call(f"Fetched: origin/main, Summary: summary, Flags: 0")
+
+    def test_fetch_changes_no_origin(self):
+        self.mock_origin.exists.return_value = False
+        result = ggs.fetch_changes("/fake/path")
+        self.assertFalse(result)
+        self.mock_print.assert_any_call("Error: Remote 'origin' does not exist in /fake/path.")
+
+    def test_fetch_changes_git_command_error(self):
+        self.mock_origin.exists.return_value = True
+        self.mock_origin.fetch.side_effect = ggs.GitCommandError("fetch", "failed")
+        result = ggs.fetch_changes("/fake/path")
+        self.assertFalse(result)
+        self.mock_print.assert_any_call("Git command error during fetch: Cmd('fetch') failed: failed")
+
+    # Tests for list_branches
+    def test_list_branches_success(self):
+        self.mock_repo_instance.heads = [MagicMock(name="main"), MagicMock(name="dev")]
+        mock_remote_ref_main = MagicMock(name="origin/main")
+        mock_remote_ref_feature = MagicMock(name="origin/feature-branch")
+        # Mock tracking for main branch
+        self.mock_repo_instance.heads[0].tracking_branch.return_value = mock_remote_ref_main
+        self.mock_repo_instance.heads[1].tracking_branch.return_value = None # dev branch doesn't track
+
+        self.mock_origin.exists.return_value = True
+        self.mock_origin.refs = [mock_remote_ref_main, mock_remote_ref_feature, MagicMock(name="origin/HEAD")]
+        
+        ggs.list_branches("/fake/path")
+        
+        self.mock_print.assert_any_call("  - main")
+        self.mock_print.assert_any_call("  - dev")
+        self.mock_print.assert_any_call("  - origin/main")
+        self.mock_print.assert_any_call("    (tracked by local: main)")
+        self.mock_print.assert_any_call("  - origin/feature-branch")
+        self.mock_origin.fetch.assert_called_once() # Called to update refs
+
+    def test_list_branches_no_origin(self):
+        self.mock_origin.exists.return_value = False
+        ggs.list_branches("/fake/path")
+        self.mock_print.assert_any_call("  Remote 'origin' does not exist.")
+
+    # Tests for checkout_branch
+    def test_checkout_branch_create_new_success(self):
+        self.mock_repo_instance.heads = {} # No existing branches by that name
+        mock_new_branch_head = MagicMock(name="new_feature")
+        self.mock_repo_instance.create_head.return_value = mock_new_branch_head
+        
+        result = ggs.checkout_branch("/fake/path", "new_feature", create_new=True)
+        
+        self.assertTrue(result)
+        self.mock_repo_instance.create_head.assert_called_once_with("new_feature")
+        mock_new_branch_head.checkout.assert_called_once()
+        self.mock_print.assert_any_call("Created and checked out new branch: new_feature")
+
+    def test_checkout_branch_create_new_already_exists(self):
+        self.mock_repo_instance.heads = {"existing_feature": MagicMock()}
+        result = ggs.checkout_branch("/fake/path", "existing_feature", create_new=True)
+        self.assertFalse(result)
+        self.mock_print.assert_any_call("Error: Branch 'existing_feature' already exists. Cannot create.")
+
+    def test_checkout_branch_local_existing(self):
+        mock_local_branch = MagicMock(name="local_dev")
+        self.mock_repo_instance.heads = {"local_dev": mock_local_branch}
+        self.mock_repo_instance.heads.__getitem__.side_effect = lambda key: mock_local_branch if key == "local_dev" else MagicMock()
+
+        result = ggs.checkout_branch("/fake/path", "local_dev")
+        self.assertTrue(result)
+        mock_local_branch.checkout.assert_called_once()
+
+    def test_checkout_remote_branch_create_tracking(self):
+        self.mock_repo_instance.heads = {} # No local branch with that name
+        self.mock_origin.exists.return_value = True
+        mock_remote_ref = MagicMock(name="origin/feature_x", remote_head="feature_x")
+        self.mock_origin.refs = [mock_remote_ref]
+        
+        mock_new_tracking_head = MagicMock(name="feature_x")
+        self.mock_repo_instance.create_head.return_value = mock_new_tracking_head
+
+        result = ggs.checkout_branch("/fake/path", "feature_x") # User provides 'feature_x'
+        
+        self.assertTrue(result)
+        self.mock_repo_instance.create_head.assert_called_once_with("feature_x", mock_remote_ref)
+        mock_new_tracking_head.set_tracking_branch.assert_called_once_with(mock_remote_ref)
+        mock_new_tracking_head.checkout.assert_called_once()
+
+    def test_checkout_remote_branch_already_tracks(self):
+        mock_local_feature_x = MagicMock(name="feature_x")
+        mock_remote_ref_feature_x = MagicMock(name="origin/feature_x", remote_head="feature_x")
+        mock_local_feature_x.tracking_branch.return_value = mock_remote_ref_feature_x # It tracks the correct remote
+        
+        self.mock_repo_instance.heads = {"feature_x": mock_local_feature_x}
+        self.mock_repo_instance.heads.__getitem__.side_effect = lambda key: mock_local_feature_x if key == "feature_x" else MagicMock()
+        self.mock_origin.exists.return_value = True
+        self.mock_origin.refs = [mock_remote_ref_feature_x] # Remote branch exists
+
+        result = ggs.checkout_branch("/fake/path", "feature_x") # Try to checkout 'feature_x'
+        
+        self.assertTrue(result)
+        mock_local_feature_x.checkout.assert_called_once()
+        self.mock_print.assert_any_call("Local branch 'feature_x' already tracks 'origin/feature_x'. Checking it out.")
+
+    def test_checkout_remote_branch_local_exists_does_not_track(self):
+        mock_local_feature_x = MagicMock(name="feature_x")
+        mock_local_feature_x.tracking_branch.return_value = None # Does not track anything
+        
+        mock_remote_ref_feature_x = MagicMock(name="origin/feature_x", remote_head="feature_x")
+        
+        self.mock_repo_instance.heads = {"feature_x": mock_local_feature_x}
+        self.mock_repo_instance.heads.__getitem__.side_effect = lambda key: mock_local_feature_x if key == "feature_x" else MagicMock()
+
+        self.mock_origin.exists.return_value = True
+        self.mock_origin.refs = [mock_remote_ref_feature_x]
+
+        result = ggs.checkout_branch("/fake/path", "feature_x")
+        self.assertFalse(result)
+        self.mock_print.assert_any_call("Error: Local branch 'feature_x' exists but does not track 'origin/feature_x'.")
+
+    def test_checkout_branch_not_found(self):
+        self.mock_repo_instance.heads = {}
+        self.mock_origin.exists.return_value = True
+        self.mock_origin.refs = [] # No remote branches match
+
+        result = ggs.checkout_branch("/fake/path", "non_existent_branch")
+        self.assertFalse(result)
+        self.mock_print.assert_any_call("Error: Branch 'non_existent_branch' not found as a local branch, and 'origin/non_existent_branch' not found on remote 'origin'.")
+
+    # Tests for pull_changes
+    def test_pull_changes_success(self):
+        self.mock_repo_instance.is_dirty.return_value = False
+        self.mock_origin.exists.return_value = True
+        mock_active_branch = MagicMock(name="main")
+        mock_tracking_branch = MagicMock(remote_name="origin", remote_head="main")
+        mock_active_branch.tracking_branch.return_value = mock_tracking_branch
+        self.mock_repo_instance.active_branch = mock_active_branch
+        
+        mock_pull_info = [MagicMock(name='origin/main', ref='refs/heads/main', summary='Pulled changes', flags=0)]
+        self.mock_origin.pull.return_value = mock_pull_info
+
+        result = ggs.pull_changes("/fake/path")
+        self.assertTrue(result)
+        self.mock_origin.pull.assert_called_once()
+
+    def test_pull_changes_repo_dirty(self):
+        self.mock_repo_instance.is_dirty.return_value = True
+        # Function might still return True after warning, or False if it decides to stop
+        # Current implementation just warns, so it would proceed.
+        # Let's assume it would try to proceed but we only check the warning here.
+        ggs.pull_changes("/fake/path")
+        self.mock_print.assert_any_call("Warning: Repository has uncommitted changes. Please commit or stash them before pulling.")
+
+    def test_pull_changes_no_tracking_branch(self):
+        self.mock_repo_instance.is_dirty.return_value = False
+        self.mock_origin.exists.return_value = True
+        mock_active_branch = MagicMock(name="main")
+        mock_active_branch.tracking_branch.return_value = None # Not tracking
+        self.mock_repo_instance.active_branch = mock_active_branch
+
+        result = ggs.pull_changes("/fake/path")
+        self.assertFalse(result)
+        self.mock_print.assert_any_call(f"Error: Current branch 'main' is not tracking any remote branch. Cannot pull.")
+
+    def test_pull_changes_git_command_error_merge_conflict(self):
+        self.mock_repo_instance.is_dirty.return_value = False
+        self.mock_origin.exists.return_value = True
+        mock_active_branch = MagicMock(name="main")
+        mock_tracking_branch = MagicMock(remote_name="origin", remote_head="main")
+        mock_active_branch.tracking_branch.return_value = mock_tracking_branch
+        self.mock_repo_instance.active_branch = mock_active_branch
+        
+        self.mock_origin.pull.side_effect = ggs.GitCommandError("pull", "Merge conflict occurred")
+
+        result = ggs.pull_changes("/fake/path")
+        self.assertFalse(result)
+        self.mock_print.assert_any_call("MERGE CONFLICT DETECTED. Please resolve conflicts manually.")
+
+
 if __name__ == '__main__':
     unittest.main()
