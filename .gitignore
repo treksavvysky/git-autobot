@@ -215,3 +215,11 @@ tmp/
 # Backup files
 *.bak
 *.backup
+
+# project specific files
+# Add any additional project-specific files or directories to ignore here
+# For example, if you have a directory for temporary files or logs:
+# temp/
+# logs/
+# If you have specific files that should not be tracked, add them here:
+repo_config.json

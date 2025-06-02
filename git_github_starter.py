@@ -39,12 +39,13 @@ Setup & Usage:
           auto-detected, the script will prompt you to enter it.
 """
 
-from git import Repo, InvalidGitRepositoryError
+from git import Repo, InvalidGitRepositoryError, GitCommandError
 from github import Github, GithubException
 import os
 import sys
 import argparse
 import re # Added re import
+import json # For repository configuration management
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if it exists
@@ -53,6 +54,65 @@ load_dotenv()
 # --- Configuration ---
 # GITHUB_TOKEN can be set as an environment variable or in a .env file.
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+# --- Repository Configuration Management ---
+REPO_CONFIG_FILE = 'repo_config.json'
+
+def load_repo_config():
+    """
+    Loads the repository configuration from REPO_CONFIG_FILE.
+    Returns an empty dictionary if the file doesn't exist or an error occurs.
+    """
+    try:
+        if os.path.exists(REPO_CONFIG_FILE):
+            with open(REPO_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        return {}
+    except (IOError, json.JSONDecodeError) as e:
+        print(f"Error loading repository configuration: {e}")
+        return {}
+
+def save_repo_config(config):
+    """
+    Saves the given config dictionary to REPO_CONFIG_FILE.
+    """
+    try:
+        with open(REPO_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+        print(f"Repository configuration saved to {REPO_CONFIG_FILE}")
+    except IOError as e:
+        print(f"Error saving repository configuration: {e}")
+
+def add_repo_to_config(name, path):
+    """
+    Adds or updates a repository name and its path in the configuration.
+    """
+    config = load_repo_config()
+    config[name] = path
+    save_repo_config(config)
+    print(f"Repository '{name}' (path: '{path}') added/updated in config.")
+
+def get_repo_path_from_config(name):
+    """
+    Retrieves the path for a given repository name from the configuration.
+    Returns None if the name is not found.
+    """
+    config = load_repo_config()
+    return config.get(name)
+
+def list_repos_from_config():
+    """
+    Lists all repositories stored in the configuration.
+    """
+    config = load_repo_config()
+    if not config:
+        print("No repositories found in the configuration.")
+        return
+
+    print("\n--- Stored Repositories ---")
+    for name, path in config.items():
+        print(f"- Name: {name}, Path: {path}")
+    print("--- End of Stored Repositories ---\n")
 
 def check_git_status_and_commit(repo_path):
     """
@@ -175,25 +235,63 @@ def get_repository_info(token, repo_name):
         print(f"Unexpected error: {e}")
 
 def is_valid_git_repo(repo_path):
-    from git import Repo, InvalidGitRepositoryError # Moved import here
+    from git import Repo, InvalidGitRepositoryError, GitCommandError  # Moved import here and added GitCommandError
     """
     Checks if the given path is a valid Git repository.
+    If not, asks the user if they want to initialize one.
 
     Args:
-        repo_path (str): The file system path to check.
-    
+        repo_path (str): The file system path to check/initialize.
+
     Returns:
-        bool: True if `repo_path` is a valid Git repository, False otherwise.
+        tuple: (bool_is_valid_or_initialized, bool_was_newly_initialized)
+               (True, False): Existing valid repo.
+               (True, True): New repo, successfully initialized.
+               (False, False): Invalid path, initialization failed or skipped.
     """
     try:
         Repo(repo_path)
-        return True
+        print(f"'{repo_path}' is already a Git repository.")
+        return True, False # Valid, not newly initialized
     except InvalidGitRepositoryError:
-        print(f"Error: {repo_path} is not a valid Git repository.")
-        return False
+        print(f"'{repo_path}' is not a valid Git repository.")
+        user_choice = input(f"Do you want to initialize a new Git repository at '{repo_path}'? (y/n): ").lower()
+        if user_choice == 'y':
+            try:
+                print(f"Initializing a new Git repository in '{repo_path}'...")
+                repo = Repo.init(repo_path)
+                print(f"Successfully initialized new Git repository in '{repo_path}'.")
+
+                commit_choice = input("Do you want to make an initial commit? (y/n): ").lower()
+                if commit_choice == 'y':
+                    try:
+                        # For a truly empty repo, need at least one file to commit.
+                        # Creating a dummy .gitkeep file.
+                        open(os.path.join(repo_path, ".gitkeep"), 'a').close()
+                        repo.index.add([".gitkeep"])
+                        repo.index.commit("Initial commit (created .gitkeep)")
+                        print("Initial commit created successfully (added .gitkeep).")
+                    except GitCommandError as commit_error:
+                        print(f"Error creating initial commit: {commit_error}")
+                        # Still consider repo initialized
+                    except Exception as e_commit:
+                        print(f"An unexpected error occurred during initial commit: {e_commit}")
+                        # Still consider repo initialized
+                else:
+                    print("Skipping initial commit.")
+                return True, True # Successfully initialized, was new
+            except GitCommandError as init_error:
+                print(f"Error initializing repository: {init_error}")
+                return False, False
+            except Exception as e_init:
+                print(f"An unexpected error occurred during repository initialization: {e_init}")
+                return False, False
+        else:
+            print("Repository initialization skipped by user.")
+            return False, False
     except Exception as e:
-        print(f"An unexpected error occurred while checking local repository: {e}")
-        return False
+        print(f"An unexpected error occurred while checking/initializing local repository: {e}")
+        return False, False
 
 def github_repo_exists(github_token, repo_name):
     """
@@ -277,91 +375,241 @@ def get_github_repo_from_local(local_repo_path):
         print(f"Error extracting GitHub repo name from local config: {e}")
         return None
 
+def clone_repository(github_token):
+    """
+    Clones a Git repository.
+
+    The user can either provide a Git repository URL directly or choose from
+    a list of their repositories on GitHub (if a token is provided).
+
+    Args:
+        github_token (str): GitHub personal access token. Can be None.
+
+    Returns:
+        str: The local path of the cloned repository if successful, otherwise None.
+    """
+    print("\n--- Clone Git Repository ---")
+    clone_url = None
+    repo_to_clone_name = None # For user feedback
+
+    choice = input("Do you want to (1) provide a Git URL or (2) list your GitHub repositories to clone? (1/2): ").strip()
+
+    if choice == '1':
+        clone_url = input("Enter the Git repository URL to clone: ").strip()
+        if not clone_url:
+            print("No URL provided. Cloning aborted.")
+            return None
+        repo_to_clone_name = clone_url # Use URL as identifier for feedback
+    elif choice == '2':
+        if not github_token:
+            print("GitHub token is required to list your repositories. Please set the GITHUB_TOKEN environment variable.")
+            return None
+        try:
+            print("Fetching your GitHub repositories...")
+            gh = Github(github_token)
+            user = gh.get_user()
+            repositories = list(user.get_repos()) # Get a list
+            if not repositories:
+                print("No repositories found on your GitHub account.")
+                return None
+
+            print("\nYour GitHub Repositories:")
+            for i, repo in enumerate(repositories):
+                print(f"{i + 1}. {repo.full_name}")
+
+            while True:
+                try:
+                    selection = int(input("Select a repository to clone (enter number): "))
+                    if 1 <= selection <= len(repositories):
+                        selected_repo = repositories[selection - 1]
+                        clone_url = selected_repo.clone_url
+                        repo_to_clone_name = selected_repo.full_name
+                        print(f"Selected repository: {repo_to_clone_name} ({clone_url})")
+                        break
+                    else:
+                        print(f"Invalid selection. Please enter a number between 1 and {len(repositories)}.")
+                except ValueError:
+                    print("Invalid input. Please enter a number.")
+        except GithubException as e:
+            print(f"GitHub API error: {e}")
+            return None
+        except Exception as e:
+            print(f"An unexpected error occurred while fetching repositories: {e}")
+            return None
+    else:
+        print("Invalid choice. Cloning aborted.")
+        return None
+
+    if not clone_url: # Should be set if either path 1 or 2 was successful
+        print("Failed to determine repository URL. Cloning aborted.")
+        return None
+
+    local_clone_path = input(f"Enter the local path to clone '{repo_to_clone_name}' into: ").strip()
+    if not local_clone_path:
+        print("No local path provided. Cloning aborted.")
+        return None
+
+    try:
+        print(f"Cloning '{repo_to_clone_name}' into '{local_clone_path}'...")
+        Repo.clone_from(clone_url, local_clone_path)
+        print(f"Repository '{repo_to_clone_name}' cloned successfully to '{local_clone_path}'.")
+        return local_clone_path
+    except GitCommandError as e:
+        print(f"Error cloning repository: {e}")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred during cloning: {e}")
+        return None
+
 def main():
     """
     Main function to orchestrate Git and GitHub operations.
-    Orchestrates the script's operations:
-    1. Parses command-line arguments.
-    2. Checks for the GITHUB_TOKEN.
-    3. Determines the local repository path (from args or prompt).
-    4. Validates the local repository path.
-    5. Determines the GitHub repository name (from args, auto-detection, or prompt).
-    6. Validates the GitHub repository name and its accessibility.
-    7. Executes Git operations (status, commit, push if changes).
-    8. Executes GitHub API operations (get info, create issue if changes and token available).
     """
     parser = argparse.ArgumentParser(description="Automate Git and GitHub operations.")
-    parser.add_argument("--local-path", help="Path to the local Git repository.")
-    parser.add_argument("--github-repo", help="GitHub repository name (e.g., username/repo).")
+
+    parser.add_argument("--local-path", help="Path to the local Git repository. Used for existing repos or as destination for init/clone.")
+    parser.add_argument("--github-repo", help="GitHub repository name (e.g., username/repo). Can be auto-detected or used for cloning.")
+    parser.add_argument("--repo-name", help="Name of the repository from config to use (will load its local path and GitHub name).")
+    parser.add_argument("list_repos", nargs='?', const=True, default=False,
+                        help="List all stored repository names and their paths from config and exit.")
+    parser.add_argument("--init-repo", action="store_true",
+                        help="Initialize a new Git repository in the path specified by --local-path (or prompt if not set).")
+    parser.add_argument("--clone-repo", action="store_true",
+                        help="Clone a Git repository. Prompts for URL/GitHub selection and local path.")
+
     args = parser.parse_args()
 
-    # Check for GITHUB_TOKEN environment variable (loaded from .env or environment).
     if not GITHUB_TOKEN:
-        print("Warning: GITHUB_TOKEN environment variable not set. GitHub API operations will be skipped.")
+        print("Warning: GITHUB_TOKEN environment variable not set. GitHub API operations will be skipped for certain actions.")
     
     print("=== Git and GitHub Automation Script ===")
-    print()
 
-    # Determine local repository path: command-line arg > prompt.
-    if args.local_path:
-        local_repo_path_input = args.local_path
-        print(f"Using local path from command line: {local_repo_path_input}")
-    else:
-        local_repo_path_input = input("Enter the local Git repository path: ")
+    if args.list_repos:
+        list_repos_from_config()
+        sys.exit(0)
 
-    # Validate local repository path.
-    if not is_valid_git_repo(local_repo_path_input):
-        print("Exiting script due to invalid local repository path.")
+    local_repo_path_input = None
+    github_repo_name_input = None # Will be determined later
+    repo_just_created_or_cloned = False
+
+    if args.clone_repo:
+        cloned_path = clone_repository(GITHUB_TOKEN)
+        if cloned_path:
+            local_repo_path_input = cloned_path
+            repo_just_created_or_cloned = True
+            save_choice = input(f"Repository cloned to '{local_repo_path_input}'. Save to config? (y/n): ").lower()
+            if save_choice == 'y':
+                config_repo_name = input("Enter a name for this repository in the config: ").strip()
+                if config_repo_name:
+                    add_repo_to_config(config_repo_name, local_repo_path_input)
+                else:
+                    print("Invalid name, not saving to config.")
+        else:
+            print("Cloning failed. Exiting.")
+            sys.exit(1)
+
+    if not local_repo_path_input and args.repo_name:
+        path_from_config = get_repo_path_from_config(args.repo_name)
+        if path_from_config:
+            local_repo_path_input = path_from_config
+            print(f"Using repository '{args.repo_name}' from config: {local_repo_path_input}")
+            # Note: github_repo_name could also be loaded from config here if structure is extended
+        else:
+            print(f"Error: Repository name '{args.repo_name}' not found in config. Exiting.")
+            sys.exit(1)
+
+    if not local_repo_path_input:
+        if args.local_path:
+            local_repo_path_input = args.local_path
+            print(f"Using local path from command line: {local_repo_path_input}")
+        else:
+            # Prompt only if not init-repo or clone-repo (clone handles its own path prompt)
+            if not args.init_repo and not args.clone_repo : # clone-repo already handled
+                 local_repo_path_input = input("Enter the local Git repository path: ").strip()
+            elif args.init_repo : # for init-repo, if no path specified, prompt is needed
+                 local_repo_path_input = input("Enter the path for the new Git repository: ").strip()
+
+
+    if not local_repo_path_input: # If path is still not determined (e.g. user provided empty input)
+        # Check if we are in an init-repo context, because is_valid_git_repo will prompt again if path is empty
+        # However, is_valid_git_repo expects a path.
+        if args.init_repo and not local_repo_path_input:
+             print("Error: A local path is required to initialize a repository. Exiting.")
+             sys.exit(1)
+        elif not args.clone_repo: # clone_repo handles its own exit if path is not provided
+            print("Error: Local repository path not specified. Exiting.")
+            sys.exit(1)
+        # If clone_repo was specified but somehow local_repo_path_input is still None here, it means cloning failed.
+        # This case should have been handled by the clone_repo block's sys.exit(1).
+
+    # Validate local repository path (this will also handle initialization if needed)
+    # The args.init_repo flag primarily ensures that a path is obtained if not provided for initialization.
+    # is_valid_git_repo itself prompts for initialization if the path is not a repo.
+    is_valid, was_newly_initialized = is_valid_git_repo(local_repo_path_input)
+
+    if not is_valid:
+        print(f"Failed to validate or initialize repository at '{local_repo_path_input}'. Exiting.")
         sys.exit(1)
 
-    # Determine GitHub repository name: command-line arg > auto-detection > prompt.
+    if was_newly_initialized and not repo_just_created_or_cloned : # Don't ask again if just cloned and saved
+        repo_just_created_or_cloned = True # Mark true to avoid re-prompting if script logic changes
+        save_choice = input(f"New repository initialized at '{local_repo_path_input}'. Save to config? (y/n): ").lower()
+        if save_choice == 'y':
+            config_repo_name = input("Enter a name for this new repository in the config: ").strip()
+            if config_repo_name:
+                add_repo_to_config(config_repo_name, local_repo_path_input)
+            else:
+                print("Invalid name, not saving to config.")
+
+    # Determine GitHub repository name
     if args.github_repo:
         github_repo_name_input = args.github_repo
         print(f"Using GitHub repo name from command line: {github_repo_name_input}")
     else:
+        # Attempt to load from config if --repo-name was used and we extend config for it (future enhancement)
+        # For now, just auto-detect or prompt
         print("Attempting to automatically determine GitHub repository name from local git config...")
         github_repo_name_input = get_github_repo_from_local(local_repo_path_input)
         if github_repo_name_input:
             print(f"Auto-detected GitHub repository name: {github_repo_name_input}")
         else:
             print("Could not auto-detect GitHub repository name.")
-            github_repo_name_input = input("Enter the GitHub repository name (e.g., username/repo): ")
+            github_repo_name_input = input("Enter the GitHub repository name (e.g., username/repo): ").strip()
 
-    # Ensure GitHub repository name is provided.
     if not github_repo_name_input:
-        print("Error: GitHub repository name is required.")
+        print("Error: GitHub repository name is required for further operations. Exiting.")
         sys.exit(1)
 
-    # Validate GitHub repository existence and accessibility.
     if not github_repo_exists(GITHUB_TOKEN, github_repo_name_input):
-        print("Exiting script due to invalid GitHub repository or access issues.")
+        print(f"Error: GitHub repository '{github_repo_name_input}' not found or not accessible. Exiting.")
         sys.exit(1)
     
+    print(f"\nProceeding with operations for local repo: '{local_repo_path_input}' and GitHub repo: '{github_repo_name_input}'\n")
+
     # --- Local Git Operations ---
-    print("1. Checking local Git repository...")
+    print("1. Checking local Git repository status...")
     changes_made = check_git_status_and_commit(local_repo_path_input)
     print()
     
     # --- GitHub API Operations ---
     if GITHUB_TOKEN:
-        print("2. Getting repository information...")
+        print("2. Getting GitHub repository information...")
         get_repository_info(GITHUB_TOKEN, github_repo_name_input)
         print()
         
-        # Optionally create an issue if changes were made
-        if changes_made:
+        if changes_made: # Optionally create an issue if changes were made and pushed
             print("3. Creating GitHub issue for the changes...")
-            issue_url = create_github_issue(
+            create_github_issue(
                 GITHUB_TOKEN,
                 github_repo_name_input,
-                "Automated Update",
-                "This issue was created automatically after pushing changes to the repository.",
-                ["automation", "script-generated"]
+                "Automated Update via Script",
+                "This issue was created automatically after changes were pushed by the script.",
+                ["automation", "script-update"]
             )
     else:
-        print("2. Skipping GitHub API operations (no token provided)")
+        print("Skipping GitHub API operations (GITHUB_TOKEN not set).")
     
-    print("\n=== Script completed ===")
+    print("\n=== Script completed successfully ===")
 
 if __name__ == "__main__":
     main()
