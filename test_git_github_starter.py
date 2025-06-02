@@ -133,9 +133,8 @@ class TestRepoOperations(unittest.TestCase):
         # Here, Repo(repo_path) is called. So, the class itself is what we patched.
         # We don't need to do anything with the mock_repo_class instance itself for this test,
         # as its mere successful instantiation (no InvalidGitRepositoryError) means it's valid.
-        is_valid, was_newly_initialized = ggs.is_valid_git_repo("/fake/path")
-        self.assertTrue(is_valid)
-        self.assertFalse(was_newly_initialized)
+        result_tuple = ggs.is_valid_git_repo("/fake/path")
+        self.assertEqual(result_tuple, (True, False))
         mock_repo_class.assert_called_once_with("/fake/path")
 
     @patch('git_github_starter.Repo.init')
