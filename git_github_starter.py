@@ -234,6 +234,58 @@ def get_repository_info(token, repo_name):
     except Exception as e:
         print(f"Unexpected error: {e}")
 
+def create_github_repository(token, repo_name_full, description="", private=False):
+    """
+    Creates a new GitHub repository.
+
+    Args:
+        token (str): GitHub personal access token.
+        repo_name_full (str): Full repository name in "username/reponame" format.
+                              Only the 'reponame' part is used for creation under the authenticated user.
+        description (str, optional): Description for the repository. Defaults to "".
+        private (bool, optional): Whether the repository should be private. Defaults to False.
+
+    Returns:
+        github.Repository.Repository: The created repository object if successful, None otherwise.
+    """
+    if not token:
+        print("Error: GitHub token is required to create a repository.")
+        return None
+
+    try:
+        gh = Github(token)
+        user = gh.get_user() # Get the authenticated user
+
+        # Extract the actual repository name from "username/reponame"
+        if '/' not in repo_name_full:
+            actual_repo_name = repo_name_full # Assume it's just the repo name
+        else:
+            username, actual_repo_name = repo_name_full.split('/', 1)
+            # We should ideally check if 'username' matches user.login, but create_repo works on the authenticated user context
+            if username != user.login:
+                print(f"Warning: Provided username '{username}' in '{repo_name_full}' does not match authenticated user '{user.login}'. Repository will be created under '{user.login}'.")
+
+        print(f"Attempting to create GitHub repository: '{user.login}/{actual_repo_name}'")
+        new_repo = user.create_repo(
+            actual_repo_name,
+            description=description,
+            private=private,
+            auto_init=False  # Set to True if you want GitHub to auto-initialize with a README
+        )
+        print(f"Successfully created GitHub repository: {new_repo.html_url}")
+        return new_repo
+    except GithubException as e:
+        # Common statuses:
+        # 422: Unprocessable Entity (often means repo already exists or name is invalid)
+        # 401: Bad credentials (token invalid or lacks permissions)
+        print(f"GitHub API error during repository creation for '{repo_name_full}': {e.status} {e.data}")
+        if e.status == 422:
+            print("This might mean the repository already exists or the name is invalid.")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred during repository creation for '{repo_name_full}': {e}")
+        return None
+
 def is_valid_git_repo(repo_path):
     from git import Repo, InvalidGitRepositoryError, GitCommandError  # Moved import here and added GitCommandError
     """
@@ -292,6 +344,77 @@ def is_valid_git_repo(repo_path):
     except Exception as e:
         print(f"An unexpected error occurred while checking/initializing local repository: {e}")
         return False, False
+
+def setup_remote_origin(local_repo_path, github_repo_url, default_branch_name="main"):
+    """
+    Sets up or updates the 'origin' remote for a local Git repository and pushes the default branch.
+
+    Args:
+        local_repo_path (str): Path to the local Git repository.
+        github_repo_url (str): The URL of the GitHub repository (e.g., new_repo.clone_url).
+        default_branch_name (str, optional): The name of the default branch to push. Defaults to "main".
+
+    Returns:
+        bool: True if setup and push were successful, False otherwise.
+    """
+    try:
+        local_git_repo = Repo(local_repo_path)
+        
+        origin = None
+        try:
+            origin = local_git_repo.remote(name='origin')
+        except ValueError: # GitPython raises ValueError if remote doesn't exist
+            print(f"No remote named 'origin' found in '{local_repo_path}'. Creating one.")
+        
+        if origin:
+            print(f"Remote 'origin' already exists in '{local_repo_path}'. Updating URL to '{github_repo_url}'.")
+            with origin.config_writer as cw:
+                cw.set("url", github_repo_url)
+            print(f"Updated remote 'origin' URL to: {github_repo_url}")
+        else:
+            origin = local_git_repo.create_remote('origin', github_repo_url)
+            print(f"Created remote 'origin' with URL: {github_repo_url}")
+
+        if not local_git_repo.heads:
+            print(f"Warning: Local repository at '{local_repo_path}' has no branches (no commits yet?). Cannot push.")
+            print("Please ensure the local repository has an initial commit on the default branch.")
+            return False
+        
+        # Ensure the specified default_branch_name actually exists locally.
+        # The initial commit by is_valid_git_repo might be 'master' or 'main'.
+        # We should push the *current* active branch if it's the one intended, or a specified one if it exists.
+        
+        local_branch_to_push = None
+        try:
+            # Check if the intended default_branch_name exists
+            local_branch_to_push = local_git_repo.heads[default_branch_name]
+            print(f"Found local branch '{default_branch_name}' to push.")
+        except IndexError: # Branch by that name doesn't exist
+            # If default_branch_name is not found, maybe the active branch is the one to push?
+            # This can happen if local repo was init'd with 'master' but GitHub's default is 'main'.
+            active_branch = local_git_repo.active_branch
+            print(f"Warning: Branch '{default_branch_name}' not found locally. Attempting to push current active branch '{active_branch.name}'.")
+            local_branch_to_push = active_branch
+            default_branch_name = active_branch.name # Update to what we are actually pushing
+
+
+        if not local_branch_to_push.commit:
+             print(f"Error: Branch '{default_branch_name}' in '{local_repo_path}' has no commits. Cannot push.")
+             return False
+
+        print(f"Pushing local branch '{default_branch_name}' to 'origin' and setting upstream...")
+        origin.push(refspec=f"{default_branch_name}:{default_branch_name}", set_upstream=True)
+        print(f"Successfully pushed '{default_branch_name}' and set remote 'origin' as upstream.")
+        return True
+    except InvalidGitRepositoryError:
+        print(f"Error: '{local_repo_path}' is not a valid Git repository.")
+        return False
+    except GitCommandError as e:
+        print(f"Git command error during remote setup for '{local_repo_path}': {e}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred during remote setup for '{local_repo_path}': {e}")
+        return False
 
 def github_repo_exists(github_token, repo_name):
     """
@@ -461,6 +584,221 @@ def clone_repository(github_token):
         print(f"An unexpected error occurred during cloning: {e}")
         return None
 
+def fetch_changes(repo_path):
+    """Fetches changes from the 'origin' remote."""
+    try:
+        print(f"\n--- Fetching changes for {repo_path} ---")
+        repo = Repo(repo_path)
+        origin = repo.remote(name='origin')
+        if not origin.exists():
+            print(f"Error: Remote 'origin' does not exist in {repo_path}.")
+            return False
+        
+        fetch_info = origin.fetch()
+        if not fetch_info:
+            print("No fetch information returned. This might indicate no changes or an issue.")
+        else:
+            for info in fetch_info:
+                print(f"Fetched: {info.name}, Summary: {info.summary}, Flags: {info.flags}")
+                if info.flags & info.ERROR:
+                    print(f"Error during fetch: {info.name} - {info.summary}")
+                elif info.flags & info.REJECTED:
+                     print(f"Fetch rejected: {info.name} - {info.summary}")
+
+        print("Fetch operation completed.")
+        return True
+    except InvalidGitRepositoryError:
+        print(f"Error: {repo_path} is not a valid Git repository.")
+        return False
+    except GitCommandError as e:
+        print(f"Git command error during fetch: {e}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred during fetch: {e}")
+        return False
+
+def list_branches(repo_path):
+    """Lists local and remote branches."""
+    try:
+        print(f"\n--- Branches for {repo_path} ---")
+        repo = Repo(repo_path)
+        
+        print("\nLocal branches:")
+        if not repo.heads:
+            print("  No local branches found.")
+        else:
+            for head in repo.heads:
+                print(f"  - {head.name}")
+        
+        print("\nRemote branches (origin):")
+        origin = repo.remote(name='origin')
+        if not origin.exists():
+            print("  Remote 'origin' does not exist.")
+            return
+
+        # Fetch to update remote refs before listing
+        print("  (Fetching remote 'origin' to ensure list is up-to-date...)")
+        origin.fetch()
+
+        if not origin.refs:
+            print("  No remote branches found on 'origin'.")
+        else:
+            for ref in origin.refs:
+                # ref.name is like 'origin/main', 'origin/feature/branch'
+                # We don't want to list 'origin/HEAD'
+                if ref.name == f"{origin.name}/HEAD":
+                    continue
+                print(f"  - {ref.name}")
+                # You could also show tracking information if a local branch tracks this remote ref
+                for local_branch in repo.heads:
+                    if local_branch.tracking_branch() and local_branch.tracking_branch().name == ref.name:
+                        print(f"    (tracked by local: {local_branch.name})")
+                        
+    except InvalidGitRepositoryError:
+        print(f"Error: {repo_path} is not a valid Git repository.")
+    except GitCommandError as e:
+        print(f"Git command error while listing branches: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred while listing branches: {e}")
+
+def checkout_branch(repo_path, branch_name, create_new=False):
+    """Checks out a branch, optionally creating it if new or tracking a remote."""
+    try:
+        print(f"\n--- Checking out branch '{branch_name}' in {repo_path} ---")
+        repo = Repo(repo_path)
+        
+        if create_new:
+            if branch_name in repo.heads:
+                print(f"Error: Branch '{branch_name}' already exists. Cannot create.")
+                return False
+            new_branch = repo.create_head(branch_name)
+            new_branch.checkout()
+            print(f"Created and checked out new branch: {branch_name}")
+            return True
+
+        # Try to checkout existing local branch
+        if branch_name in repo.heads:
+            print(f"Checking out existing local branch: {branch_name}")
+            repo.heads[branch_name].checkout()
+            print(f"Successfully checked out local branch: {branch_name}")
+            return True
+
+        # Try to checkout remote branch (e.g., origin/main as main)
+        origin = repo.remote(name='origin')
+        if not origin.exists():
+            print("Error: Remote 'origin' not found. Cannot checkout remote branch.")
+            return False
+
+        remote_branch_name_full = branch_name # e.g. user provides "main" intending "origin/main"
+        if not branch_name.startswith(f"{origin.name}/"):
+             remote_branch_name_full = f"{origin.name}/{branch_name}" # e.g. "origin/main"
+
+        # Check if the remote branch exists
+        remote_ref_to_track = None
+        for ref in origin.refs:
+            if ref.name == remote_branch_name_full:
+                remote_ref_to_track = ref
+                break
+        
+        if not remote_ref_to_track:
+            print(f"Error: Branch '{branch_name}' not found as a local branch, and '{remote_branch_name_full}' not found on remote 'origin'.")
+            print("Please fetch changes or check branch name.")
+            return False
+
+        # At this point, remote_ref_to_track is valid (e.g., origin.refs['main'] or origin.refs['feature/foo'])
+        # Determine local name for the new tracking branch
+        local_tracking_branch_name = remote_ref_to_track.remote_head # e.g. 'main' from 'origin/main'
+
+        if local_tracking_branch_name in repo.heads:
+            # Local branch with the target name already exists
+            local_branch = repo.heads[local_tracking_branch_name]
+            if local_branch.tracking_branch() and local_branch.tracking_branch().name == remote_ref_to_track.name:
+                print(f"Local branch '{local_tracking_branch_name}' already tracks '{remote_ref_to_track.name}'. Checking it out.")
+                local_branch.checkout()
+                print(f"Successfully checked out branch: {local_tracking_branch_name}")
+                return True
+            else:
+                print(f"Error: Local branch '{local_tracking_branch_name}' exists but does not track '{remote_ref_to_track.name}'.")
+                print("Please resolve this manually (e.g., rename local branch or set tracking).")
+                return False
+        else:
+            # Create new local branch tracking the remote one
+            print(f"Creating local branch '{local_tracking_branch_name}' to track remote branch '{remote_ref_to_track.name}'.")
+            new_tracking_branch = repo.create_head(local_tracking_branch_name, remote_ref_to_track)
+            new_tracking_branch.set_tracking_branch(remote_ref_to_track) # Ensure tracking is set
+            new_tracking_branch.checkout()
+            print(f"Successfully created and checked out branch '{local_tracking_branch_name}' tracking '{remote_ref_to_track.name}'.")
+            return True
+            
+    except InvalidGitRepositoryError:
+        print(f"Error: {repo_path} is not a valid Git repository.")
+        return False
+    except GitCommandError as e:
+        print(f"Git command error during checkout: {e}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred during checkout: {e}")
+        return False
+
+def pull_changes(repo_path):
+    """Pulls changes for the current branch from 'origin'."""
+    try:
+        print(f"\n--- Pulling changes for current branch in {repo_path} ---")
+        repo = Repo(repo_path)
+        
+        if repo.is_dirty():
+            print("Warning: Repository has uncommitted changes. Please commit or stash them before pulling.")
+            # Optionally, you could offer to stash them here. For now, just warn.
+            # return False # Or proceed with caution
+
+        origin = repo.remote(name='origin')
+        if not origin.exists():
+            print("Error: Remote 'origin' not found. Cannot pull.")
+            return False
+
+        current_branch = repo.active_branch
+        tracking_branch = current_branch.tracking_branch()
+
+        if not tracking_branch:
+            print(f"Error: Current branch '{current_branch.name}' is not tracking any remote branch. Cannot pull.")
+            print(f"Please set upstream for '{current_branch.name}' first (e.g., by pushing with --set-upstream or using `git branch --set-upstream-to=origin/{current_branch.name}`).")
+            return False
+        
+        print(f"Pulling changes from '{tracking_branch.remote_name}/{tracking_branch.remote_head}' into local branch '{current_branch.name}'...")
+        # origin.pull() pulls the current *tracked* branch by default.
+        # We can be more explicit if needed, but this should generally work if tracking is set.
+        pull_info = origin.pull()
+
+        if not pull_info:
+            print("No pull information returned. This might mean no changes or an issue.")
+        else:
+            for info in pull_info:
+                 print(f"Pulled: {info.name}, Ref: {info.ref}, Summary: {info.summary}, Flags: {info.flags}")
+                 if info.flags & info.ERROR:
+                     print(f"  Error during pull: {info.ref} - {info.summary}")
+                 elif info.flags & info.REJECTED:
+                     print(f"  Pull rejected: {info.ref} - {info.summary}")
+                 elif info.flags & info.NO_CHANGE:
+                     print(f"  No changes for {info.ref}.")
+                 elif info.flags & info.FAST_FORWARD or info.flags & info.MERGE:
+                     print(f"  Successfully updated {info.ref}.")
+
+
+        print("Pull operation completed.")
+        return True
+    except InvalidGitRepositoryError:
+        print(f"Error: {repo_path} is not a valid Git repository.")
+        return False
+    except GitCommandError as e:
+        print(f"Git command error during pull: {e}")
+        # Common errors: merge conflicts
+        if "merge conflict" in str(e).lower():
+            print("MERGE CONFLICT DETECTED. Please resolve conflicts manually.")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred during pull: {e}")
+        return False
+
 def main():
     """
     Main function to orchestrate Git and GitHub operations.
@@ -476,6 +814,13 @@ def main():
                         help="Initialize a new Git repository in the path specified by --local-path (or prompt if not set).")
     parser.add_argument("--clone-repo", action="store_true",
                         help="Clone a Git repository. Prompts for URL/GitHub selection and local path.")
+    parser.add_argument("--create-github-repo", action="store_true", help="If specified, and the GitHub repository does not exist, attempt to create it.")
+    # New arguments for fetch, branch, pull operations
+    parser.add_argument("--fetch", action="store_true", help="Fetch changes from the 'origin' remote.")
+    parser.add_argument("--list-branches", action="store_true", help="List local and remote branches.")
+    parser.add_argument("--checkout", metavar="BRANCH_NAME", help="Checkout an existing local or remote branch. For remote, attempts to create a local tracking branch.")
+    parser.add_argument("--create-branch", metavar="BRANCH_NAME", help="Create a new local branch and check it out.")
+    parser.add_argument("--pull", action="store_true", help="Pull changes for the current tracked branch from 'origin'.")
 
     args = parser.parse_args()
 
@@ -580,9 +925,61 @@ def main():
         print("Error: GitHub repository name is required for further operations. Exiting.")
         sys.exit(1)
 
-    if not github_repo_exists(GITHUB_TOKEN, github_repo_name_input):
-        print(f"Error: GitHub repository '{github_repo_name_input}' not found or not accessible. Exiting.")
-        sys.exit(1)
+    repo_exists_on_github = github_repo_exists(GITHUB_TOKEN, github_repo_name_input)
+
+    if not repo_exists_on_github:
+        if args.create_github_repo:
+            if not GITHUB_TOKEN:
+                print("Error: --create-github-repo requires GITHUB_TOKEN to be set. Exiting.")
+                sys.exit(1)
+            
+            print(f"Attempting to create GitHub repository '{github_repo_name_input}' as per --create-github-repo flag.")
+            # You might want to gather description from user or args
+            repo_description = f"Repository {github_repo_name_input} created by git_github_starter.py" 
+            created_repo_obj = create_github_repository(
+                GITHUB_TOKEN, 
+                github_repo_name_input, 
+                description=repo_description, # Pass a description
+                private=False # Default to public, could be an arg
+            )
+
+            if created_repo_obj:
+                print(f"Repository '{created_repo_obj.full_name}' created successfully on GitHub: {created_repo_obj.html_url}")
+                
+                # Determine current local branch name to push
+                try:
+                    local_git_repo_for_branch_check = Repo(local_repo_path_input)
+                    # Ensure there's at least one commit, otherwise active_branch might error or be unexpected
+                    if not local_git_repo_for_branch_check.head.is_valid() or not local_git_repo_for_branch_check.active_branch.commit:
+                        print(f"Error: Local repository at '{local_repo_path_input}' has no commits on the current branch.")
+                        print("Please make an initial commit before trying to push to a new GitHub repository.")
+                        sys.exit(1)
+                    current_local_branch_name = local_git_repo_for_branch_check.active_branch.name
+                except Exception as e:
+                    print(f"Critical: Could not determine active local branch from '{local_repo_path_input}': {e}")
+                    print("This usually means the local repository is not in a valid state (e.g., no commits).")
+                    sys.exit(1)
+
+                print(f"Now setting up local remote 'origin' to '{created_repo_obj.clone_url}' and pushing branch '{current_local_branch_name}'.")
+                setup_success = setup_remote_origin(
+                    local_repo_path_input, 
+                    created_repo_obj.clone_url, 
+                    default_branch_name=current_local_branch_name
+                )
+                if not setup_success:
+                    print(f"Failed to set up remote 'origin' for '{local_repo_path_input}' or push initial content.")
+                    print(f"The GitHub repository '{created_repo_obj.html_url}' was created, but you may need to manually set up the remote and push.")
+                    sys.exit(1) 
+                print(f"Successfully set up remote 'origin' and pushed '{current_local_branch_name}'.")
+                # Update github_repo_name_input to the full name from the created repo object to ensure consistency
+                github_repo_name_input = created_repo_obj.full_name 
+            else:
+                print(f"Failed to create GitHub repository '{github_repo_name_input}'. Please check logs. Exiting.")
+                sys.exit(1)
+        else:
+            # This is the original behavior: repo doesn't exist and user didn't ask to create it.
+            print(f"Error: GitHub repository '{github_repo_name_input}' not found or not accessible, and --create-github-repo not specified. Exiting.")
+            sys.exit(1)
     
     print(f"\nProceeding with operations for local repo: '{local_repo_path_input}' and GitHub repo: '{github_repo_name_input}'\n")
 
@@ -592,7 +989,9 @@ def main():
     print()
     
     # --- GitHub API Operations ---
-    if GITHUB_TOKEN:
+    if GITHUB_TOKEN and not (args.fetch or args.list_branches or args.checkout or args.create_branch or args.pull):
+        # Only run these if no other specific git operation was requested that might not need full GitHub API interaction immediately
+        # Or, adjust this logic if these info/issue creation steps are desired alongside other ops.
         print("2. Getting GitHub repository information...")
         get_repository_info(GITHUB_TOKEN, github_repo_name_input)
         print()
@@ -606,8 +1005,24 @@ def main():
                 "This issue was created automatically after changes were pushed by the script.",
                 ["automation", "script-update"]
             )
-    else:
+    elif not GITHUB_TOKEN and not (args.fetch or args.list_branches or args.checkout or args.create_branch or args.pull):
         print("Skipping GitHub API operations (GITHUB_TOKEN not set).")
+
+    # --- Additional Git Operations based on new flags ---
+    if args.fetch:
+        fetch_changes(local_repo_path_input)
+
+    if args.list_branches:
+        list_branches(local_repo_path_input) # List branches after potential fetch
+
+    if args.create_branch:
+        checkout_branch(local_repo_path_input, args.create_branch, create_new=True)
+    elif args.checkout: # Ensure this is mutually exclusive with create_branch if it implies checkout
+        checkout_branch(local_repo_path_input, args.checkout)
+    
+    # Pull operation should ideally be after any checkout or branch creation
+    if args.pull:
+        pull_changes(local_repo_path_input)
     
     print("\n=== Script completed successfully ===")
 
