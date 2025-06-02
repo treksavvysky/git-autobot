@@ -265,29 +265,33 @@ def is_valid_git_repo(repo_path):
                 commit_choice = input("Do you want to make an initial commit? (y/n): ").lower()
                 if commit_choice == 'y':
                     try:
-                        repo.index.commit("Initial commit")
-                        print("Initial commit created successfully.")
+                        # For a truly empty repo, need at least one file to commit.
+                        # Creating a dummy .gitkeep file.
+                        open(os.path.join(repo_path, ".gitkeep"), 'a').close()
+                        repo.index.add([".gitkeep"])
+                        repo.index.commit("Initial commit (created .gitkeep)")
+                        print("Initial commit created successfully (added .gitkeep).")
                     except GitCommandError as commit_error:
                         print(f"Error creating initial commit: {commit_error}")
-                        # Still return True as repo was initialized
+                        # Still consider repo initialized
                     except Exception as e_commit:
                         print(f"An unexpected error occurred during initial commit: {e_commit}")
-                        # Still return True as repo was initialized
+                        # Still consider repo initialized
                 else:
                     print("Skipping initial commit.")
-                return True
+                return True, True # Successfully initialized, was new
             except GitCommandError as init_error:
                 print(f"Error initializing repository: {init_error}")
-                return False
+                return False, False
             except Exception as e_init:
                 print(f"An unexpected error occurred during repository initialization: {e_init}")
-                return False
+                return False, False
         else:
             print("Repository initialization skipped by user.")
-            return False
+            return False, False
     except Exception as e:
         print(f"An unexpected error occurred while checking/initializing local repository: {e}")
-        return False
+        return False, False
 
 def github_repo_exists(github_token, repo_name):
     """
