@@ -1,2 +1,0 @@
-This is a test file to verify the git_github_starter.py fixes.
-Created to test the interactive commit functionality.
