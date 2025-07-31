@@ -1,6 +1,27 @@
 # Git Autobot
 
-A developer CLI tool to streamline git workflows.
+A powerful developer CLI tool to streamline git workflows and repository management.
+
+## Features
+
+### 🏗️ **Modular Architecture**
+- **Repository Management**: Add, remove, list, and configure multiple repositories
+- **Git Operations**: Comprehensive git workflow automation
+- **Rich CLI**: Beautiful, interactive command-line interface with help and completion
+- **Flexible Targeting**: Work with repositories via aliases, paths, or current directory
+
+### 🗂️ **Repository Management**
+- Store and manage multiple repository configurations
+- Auto-detect GitHub repository information
+- Track important branches per repository
+- Rich tabular display of repository information
+
+### 🔄 **Git Operations**
+- Repository status with beautiful formatting
+- Branch management and visualization
+- Commit, push, pull operations
+- Quick-commit for rapid development
+- Repository synchronization (commit + pull + push)
 
 ## Installation
 
@@ -10,16 +31,180 @@ Install the package in editable mode:
 uv pip install -e .
 ```
 
-## Usage
+## Quick Start
 
-Once installed, you can use the `git-autobot` command.
-
-To see the current version:
+### 1. Add a Repository
 ```bash
-git-autobot --version
+# Add current directory
+git-autobot repo add my-project . --desc "My awesome project"
+
+# Add with GitHub info
+git-autobot repo add my-api /path/to/api --github user/api-repo --branches "main,develop"
 ```
 
-You can also run it as a module:
+### 2. List Repositories
 ```bash
-python -m git_autobot --version
+git-autobot repo list
 ```
+
+### 3. Git Operations
+```bash
+# Check status of current repo
+git-autobot git status
+
+# Check status using alias
+git-autobot git status --alias my-project
+
+# Quick commit and stage
+git-autobot git quick-commit "Fix important bug"
+
+# Sync repository (commit + pull + push)
+git-autobot git sync --message "Update from local changes"
+```
+
+## Commands Reference
+
+### Repository Management (`git-autobot repo`)
+
+| Command | Description |
+|---------|-------------|
+| `add <alias> <path>` | Add repository to configuration |
+| `remove <alias>` | Remove repository from configuration |
+| `list` | List all configured repositories |
+| `show <alias>` | Show detailed repository information |
+| `update <alias>` | Update repository configuration |
+
+**Add Command Options:**
+- `--github, -g`: GitHub repository name (user/repo)
+- `--branches, -b`: Important branches (comma-separated)
+- `--url, -u`: Git remote URL
+- `--desc, -d`: Repository description
+
+### Git Operations (`git-autobot git`)
+
+| Command | Description |
+|---------|-------------|
+| `status` | Show repository status with rich formatting |
+| `branches` | Display branch information |
+| `add` | Stage all changes |
+| `commit <message>` | Commit with message |
+| `push` | Push to remote |
+| `pull` | Pull from remote |
+| `checkout <branch>` | Checkout branch |
+| `quick-commit <message>` | Stage all + commit + optional push |
+| `sync` | Full sync: commit local changes, pull, push |
+
+**Targeting Options (available for all git commands):**
+- `--alias, -a`: Use configured repository alias
+- `--path, -p`: Use direct repository path
+- *(no option)*: Use current directory if it's a git repository
+
+**Additional Options:**
+- `commit --add`: Stage all changes before committing
+- `checkout --create, -c`: Create branch if it doesn't exist
+- `quick-commit --push`: Push after committing
+- `sync --message, -m`: Custom commit message for local changes
+
+## Examples
+
+### Setting Up Multiple Projects
+```bash
+# Add your main projects
+git-autobot repo add frontend ~/projects/my-app-frontend --github myorg/frontend
+git-autobot repo add backend ~/projects/my-app-backend --github myorg/backend --branches "main,develop,staging"
+git-autobot repo add scripts ~/scripts --desc "Utility scripts"
+
+# View all projects
+git-autobot repo list
+```
+
+### Daily Workflow
+```bash
+# Check status of all your projects
+git-autobot git status --alias frontend
+git-autobot git status --alias backend
+
+# Quick development cycle
+cd ~/projects/my-app-frontend
+git-autobot git quick-commit "Add new feature"
+git-autobot git sync  # Commit any remaining changes, pull, and push
+
+# Work with branches
+git-autobot git checkout develop --alias backend
+git-autobot git branches --alias backend
+```
+
+### Repository Management
+```bash
+# Update repository info
+git-autobot repo update frontend --branches "main,develop,feature/new-ui"
+
+# Show detailed info
+git-autobot repo show backend
+
+# Remove old projects
+git-autobot repo remove old-project --force
+```
+
+## Configuration
+
+Repository configurations are stored in `repo_config.json` in the current directory. The configuration includes:
+
+```json
+{
+  "my-project": {
+    "path": "/absolute/path/to/repository",
+    "github_repo_name": "user/repository",
+    "branches": ["main", "develop"],
+    "url": "git@github.com:user/repository.git",
+    "description": "Project description"
+  }
+}
+```
+
+## Development
+
+### Architecture
+
+The project follows a modular architecture:
+
+```
+git_autobot/
+├── __main__.py          # Main CLI entry point
+├── core/                # Core functionality
+│   ├── config.py        # Configuration management
+│   └── git_ops.py       # Git operations
+└── commands/            # Command modules
+    ├── repo.py          # Repository management commands
+    └── git_ops.py       # Git operation commands
+```
+
+### Key Design Principles
+
+1. **Modularity**: Each command group is in its own module
+2. **Rich UI**: Beautiful tables and formatting using Rich library
+3. **Flexible Targeting**: Multiple ways to specify repositories
+4. **Error Handling**: Graceful error handling with helpful messages
+5. **Extensibility**: Easy to add new command groups and operations
+
+### Adding New Commands
+
+To add a new command group:
+
+1. Create a new module in `commands/`
+2. Define a Typer app for the command group
+3. Add commands to the app
+4. Import and add to main CLI in `__main__.py`
+
+## Version
+
+Current version: **0.2.0**
+
+## Requirements
+
+- Python >= 3.13
+- GitPython >= 3.1.44
+- PyGithub >= 2.6.1
+- Typer >= 0.12.3
+- Rich >= 13.0.0
+- python-dotenv >= 1.0.0
