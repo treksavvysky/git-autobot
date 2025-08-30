@@ -208,3 +208,31 @@ Current version: **0.2.0**
 - Typer >= 0.12.3
 - Rich >= 13.0.0
 - python-dotenv >= 1.0.0
+
+## FastAPI GitHub API
+
+A simple FastAPI application is included to list your GitHub repositories using your personal access token.
+
+### Local Development
+
+1. Install dependencies:
+   ```bash
+   uv pip install -r requirements.txt
+   ```
+2. Run the server:
+   ```bash
+   uv run uvicorn fastapi_app:app --reload
+   ```
+3. Open your browser at `http://127.0.0.1:8000/docs` to explore the API via Swagger UI.
+
+### Docker
+
+1. Build the image:
+   ```bash
+   docker build -t git-autobot-api .
+   ```
+2. Run the container (pass your token via environment variable):
+   ```bash
+   docker run -e GITHUB_TOKEN=your_token -p 8000:8000 git-autobot-api
+   ```
+3. Visit `http://localhost:8000/docs` for the interactive API documentation.
