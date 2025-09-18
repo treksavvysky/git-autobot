@@ -1,0 +1,70 @@
+Technical Description: Repository Dashboard Prototype
+1. Overview
+This document describes a single-file HTML prototype for a Git repository dashboard. The prototype is a static, non-functional visual blueprint designed to guide the development of a dynamic web application. It uses placeholder data to illustrate the layout and user interface for managing a single repository.
+Key Technologies:
+HTML5: For the core structure and content.
+Tailwind CSS: For the primary utility-first styling framework, loaded via a CDN.
+Custom Inline CSS: A small <style> block in the <head> defines the base theme (colors, fonts), a reusable .card component style, and other minor global styles.
+2. Page Structure & Layout
+The dashboard is built on a responsive, multi-column grid system that adapts to different screen sizes.
+Main Container: A max-w-7xl container centers the content with horizontal padding that adjusts for mobile (p-4), tablet (sm:p-6), and desktop (lg:p-8) views.
+Header (<header>): This section contains the Repository Overview component. It is a full-width block at the top of the page.
+Dashboard Grid: The main content area is a CSS Grid (grid) that organizes the various dashboard cards.
+On large screens (lg:), it's a 3-column layout. On extra-large screens (xl:), it expands to 4 columns.
+On smaller screens, the columns stack vertically (grid-cols-1).
+Specific components span multiple columns (e.g., lg:col-span-2) to create a balanced, masonry-style layout.
+3. Component Breakdown
+The UI is divided into distinct, card-based components. Each card shares a common style defined by the .card class.
+3.1. Repository Overview (Header)
+This is the main context-setting component.
+Identification: Displays the repository name and description.
+Actions: Includes a placeholder "Push Changes" button.
+Local State Panel: This is the most critical interactive element in the header. It's designed to reflect three distinct states of the local repository relative to the remote. In the prototype, these states are implemented as commented-out HTML blocks. Only one state should be uncommented at a time for preview.
+State 1: Not Cloned: Shows a "Local Status: Not Found" message and a primary "Clone Repository" button. The branch selector and commit info are hidden.
+State 2: Synced: Displays the current branch, a "Synced" status indicator (green checkmark), and the last commit information.
+State 3: Out of Sync (Default View): Shows the current branch, sync status with "Ahead" (green) and "Behind" (red) commit counts, and last commit info.
+3.2. Git Commands Helper
+Purpose: Provides quick access to common Git commands.
+Structure:
+A "Contextual Suggestion" section highlights a recommended command based on the repository's state (e.g., git pull --rebase).
+A collapsible <details> element contains a list of frequently used commands (pull, push, stash), each with a "copy" button icon.
+Commands are styled with a monospace font (Fira Code) for readability.
+3.3. Task/Workflow Panel
+Purpose: To surface pending tasks and recurring chores.
+Structure: A two-column grid within the card separates:
+Open PRs & Issues: A list of links with status dots (green for open PRs, yellow for issues).
+Recurring DevOps: A checklist of common maintenance tasks (e.g., "Update dependencies").
+3.4. Commit & Diff Tools
+Purpose: To inspect recent changes.
+Structure:
+A scrollable list displays recent commits with the message, short SHA, author, and timestamp.
+A footer contains action buttons for "Quick-diff vs main" and "View Staged Changes."
+3.5. Branch & PR Management
+Purpose: To visualize and manage branches.
+Structure:
+An inline SVG serves as a placeholder for a visual branch graph.
+Footer buttons provide quick actions like "New Branch from main" and "Delete Stale Branches."
+3.6. CI/CD & Health Monitor
+Purpose: To provide a quick overview of repository health.
+Structure: A simple key-value list displaying metrics like "Last GitHub Actions run," "Test Coverage," and "Docker Build Status," complete with color-coded status indicators.
+3.7. Notes & Snippets (Captain's Log)
+Purpose: A personal scratchpad for the repository.
+Structure:
+A <textarea> for free-form personal notes.
+A "Saved Snippets" section to store useful one-liners or custom commands.
+3.8. AI Assistant Hooks
+Purpose: To integrate with an external AI/GPT tool.
+Structure:
+Styled with a distinct blue border to indicate its special function.
+Contains action buttons like "Explain recent error..." and "Suggest next step..."
+Includes a "Daily Brief" section to display AI-generated summaries.
+4. Styling & Theming
+Color Palette: A dark theme inspired by code editors, using a base background of #0d1117 and card backgrounds of #161b22. Borders are a subtle #30363d.
+Typography:
+Inter: Used for all standard UI text.
+Fira Code: Used for all code snippets, commit SHAs, and branch names to improve readability.
+Buttons & Interactivity:
+.btn: A base class for standard buttons.
+.btn-primary: A modifier for primary actions (e.g., "Clone," "Push"), styled in green.
+Standard buttons have a subtle hover effect (background-color change), but the main .card components do not change on hover to maintain a stable, non-distracting UI.
+This specification provides a complete overview of the static prototype, ready for a developer to begin implementing the necessary JavaScript logic to create a fully functional dashboard.

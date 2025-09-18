@@ -15,6 +15,9 @@ class Repository(BaseModel):
     description: Optional[str]
     visibility: str
     default_branch: str
+    language: Optional[str]
+    updated_at: Optional[str]
+    html_url: str
 
 
 class CommitMetadata(BaseModel):
@@ -71,7 +74,7 @@ def get_github_client(token: Optional[str] = Query(default=None, description="Gi
 
 
 BASE_DIR = Path(__file__).resolve().parent
-LOCAL_REPOS_DIR = Path(os.getenv("LOCAL_REPOS_DIR", BASE_DIR.parent / "local_repos")).resolve()
+LOCAL_REPOS_DIR = Path(os.getenv("LOCAL_REPOS_DIR", BASE_DIR / "local_repos")).resolve()
 LOCAL_REPOS_DIR.mkdir(parents=True, exist_ok=True)
 
 @app.middleware("http")
@@ -104,6 +107,9 @@ def list_repositories(gh: Github = Depends(get_github_client)) -> List[Repositor
                 description=r.description,
                 visibility="private" if r.private else "public",
                 default_branch=r.default_branch,
+                language=r.language,
+                updated_at=str(r.updated_at) if r.updated_at else None,
+                html_url=r.html_url,
             )
             for r in user.get_repos()
         ]

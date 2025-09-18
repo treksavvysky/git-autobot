@@ -1,0 +1,48 @@
+Technical description of a single repository card component, breaking down its structure, styling, and data mapping.
+
+1. Main Container (<div>)
+This is the root element of the card.
+
+Structure: A div element acting as a flex container with a vertical direction (flex flex-col). This allows the card body to grow and push the footer to the bottom.
+
+Styling:
+
+bg-gray-800/50: A semi-transparent dark gray background.
+
+border border-gray-700: A subtle border.
+
+rounded-lg p-6: Rounded corners and internal padding.
+
+shadow-lg: A standard box shadow for depth.
+
+Interactivity: hover: pseudo-classes (hover:shadow-blue-500/20, hover:border-blue-500/50) change the border and shadow color on mouseover, providing visual feedback.
+
+Animation: The card-enter class is initially applied. JavaScript then adds card-enter-active to trigger a CSS transition that fades the card in and slides it up slightly for a smooth loading effect.
+
+2. Card Body (<div class="flex-grow">)
+This section contains the primary information about the repository. The flex-grow class ensures it expands to fill available vertical space.
+
+Header: A flex container (flex justify-between) that holds:
+
+Repository Name (<h3> -> <a>): A clickable link that opens the repository's GitHub page in a new tab (target="_blank"). The text content is mapped from the repo.name property of the API response.
+
+Language Badge (<span>): This element is rendered conditionally. If the repo.language property exists in the API data, a styled pill-like badge is displayed. Otherwise, nothing is rendered.
+
+Description (<p>):
+
+Displays the text from the repo.description property.
+
+Fallback: It uses a JavaScript logical OR (||) to display "No description provided." if the description field is null or empty.
+
+Sizing: min-h-[40px] is applied to ensure a consistent card height across the grid, preventing layout shifts caused by varying description lengths.
+
+3. Card Footer (<div>)
+This section at the bottom displays repository metadata and is separated from the body by a top border (border-t).
+
+Layout: A flex container (flex items-center) to align the metadata icons and text horizontally.
+
+Last Updated (<span>):
+
+This is pushed to the far right using ml-auto (margin-left: auto).
+
+The repo.updated_at value (an ISO 8601 timestamp string) is converted into a JavaScript Date object and formatted to a more readable local date string using .toLocaleDateString().
