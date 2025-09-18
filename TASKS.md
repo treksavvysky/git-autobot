@@ -1,145 +1,118 @@
-TASK.md — FastAPI Support for Cockpit-Style Repository Dashboard
-Objective
+# TASKS.md — GitPython Clone Flow & Repo Path
 
-Implement the missing FastAPI endpoints required by the Repository Dashboard (Next.js) so the page can operate entirely on live data and actions. Keep the API surface cohesive, documented, and CORS‑enabled.
+## Objective
 
-Scope
+Enable the **Clone Repository** button to provision a local, host‑visible working copy using the **GitPython** SDK (not raw CLI calls). Ensure the clone lives under a configurable **`REPO_PATH`** and can be used by external tools (VSCode, code‑server) outside the app/container. Update dependency manifests to include GitPython and document the workflow.
 
-Only implement the endpoints listed below (no extra features beyond what is required by the dashboard). Preserve existing routes and their behavior. Provide minimal request/response schemas (pydantic models) and standardized error handling.
+## Summary of Work
 
-Non‑Goals
+- Implement/finish `POST /local/repos/{name}/clone` in FastAPI using **GitPython** via a service function (no Git logic inside route files).
+- Ensure the working copy is created/updated under **`${REPO_PATH}/${name}`** and is bind‑mounted into containers.
+- Plumb **`REPO_PATH`** through `docker-compose.yaml`, `./docker-run.sh`, and `.env` (with clear precedence).
+- Update **requirements** and **pyproject** to include **GitPython** and compatible pins for `uv` workflows.
+- Update **README.md** to document configuration, run instructions, and verification.
 
-Frontend work in Next.js (handled separately).
+> AI Assistant Hooks and unsupported GitHub endpoints remain stubbed/fictitious as previously agreed; no changes required in this task.
 
-Business logic beyond Git operations, GitHub API passthrough, and simple task/notes storage.
+---
 
-Constraints
+## Deliverables
 
-Follow RESTful naming and use nouns for resources.
+1. **FastAPI backend**
 
-JSON in/out; UTF‑8; timestamps in ISO‑8601.
+   - Route: `POST /local/repos/{name}/clone` (router: `routes/local.py`).
+   - Service: `services/git_service.py` — contains all GitPython interactions.
+   - Behavior:
 
-Idempotent GET; safe error messages (no secrets); rate‑limit as needed.
+     - If local repo **does not exist**: create parent dirs, **clone** from GitHub.
+     - If local repo **exists**: validate `origin` matches, **fetch** and fast‑forward the current branch when clean; otherwise no‑op with clear status.
+     - Return JSON with host path and action summary: `{ "path": "/abs/host/path", "created": bool, "updated": bool, "default_branch": "main" }`.
 
-Respect .env (e.g., GITHUB_TOKEN, LOCAL_REPOS_DIR).
+   - Safety: sanitize `{name}`, ensure paths remain **inside** `REPO_PATH`, never log secrets.
 
-Add CORS for all new routes.
+2. **Configuration & Runtime**
 
-Acceptance Criteria
+   - **Env var:** `REPO_PATH` (absolute path). Resolution priority: `./docker-run.sh --repo-path` → `.env` → compose default.
+   - **docker-compose.yaml:**
 
-All endpoints compile and run under uvicorn.
+     - `environment:` add `REPO_PATH=${REPO_PATH}`
+     - `volumes:` add `- ${REPO_PATH}:${REPO_PATH}`
 
-200/4xx/5xx semantics are correct; structured error payloads.
+   - **./docker-run.sh:**
 
-Basic unit tests for happy-path and key failure modes per route.
+     - Accept `--repo-path /abs/path` (or positional). Export `REPO_PATH` and pass `-e REPO_PATH` and `-v` mapping to `docker run`.
 
-Lint/format clean (ruff/flake8 + black) and type-checked (mypy/pyright).
+   - **.env:** allow specifying `REPO_PATH=/absolute/host/path` (documented; optional if provided via script).
 
-OpenAPI docs (/docs) list each new endpoint with models and examples.
+3. **Dependency Manifests**
 
-New Endpoints to Implement
-Repository Overview & Local Sync
+   - **requirements.txt** — add (or ensure):
 
-GET /repos/{name}/sync-status
+     ```txt
+     GitPython>=3.1
+     ```
 
-GET /repos/{name}/branches
+   - **pyproject.toml** — add under `[project] dependencies`:
 
-GET /local/repos/{name}
+     ```toml
+     [project]
+     # ... existing fields
+     dependencies = [
+       # existing deps ...
+       "GitPython>=3.1",
+     ]
+     ```
 
-POST /local/repos/{name}/clone
+   - **uv usage** (if using Astral’s `uv`):
 
-GET /local/repos/{name}/status
+     - Add via: `uv add GitPython>=3.1`
+     - Lock/update: `uv lock`
 
-POST /local/repos/{name}/pull (query/body flag: rebase: bool)
+4. **Documentation**
 
-POST /local/repos/{name}/push (optional: branch)
+   - **README.md:**
 
-README
+     - Prereqs: Git installed on host and container; GitHub token configured if needed.
+     - Configure: `REPO_PATH` via `.env` or `./docker-run.sh --repo-path`.
+     - Run: compose/uv instructions; how to click **Clone Repository**.
+     - Verify: on **host**, `cd $REPO_PATH/<repo> && git status` should work.
+     - Troubleshooting: permissions, wrong remote, dirty working tree, token/auth.
 
-GET /repos/{name}/readme/rendered
+---
 
-Git Command Helper
+## Acceptance Criteria
 
-POST /local/repos/{name}/stash (create/apply/drop)
+- Calling `POST /local/repos/{name}/clone` on a new repo creates `${REPO_PATH}/{name}` with a valid Git working copy (visible on host).
+- Calling again on an existing clean repo fetches/fast‑forwards (no data loss).
+- The path is bind‑mounted in compose and discoverable by other tools.
+- `requirements.txt` and `pyproject.toml` both declare **GitPython** (compatible with `uv`).
+- README documents setup and verification steps.
+- OpenAPI `/docs` shows the endpoint with request/response examples.
 
-POST /local/repos/{name}/commit (message, author opts)
+---
 
-POST /local/repos/{name}/checkout (branch, create flag)
+## Non‑Goals
 
-POST /local/repos/{name}/reset (mode: soft/mixed/hard, ref)
+- Implementing complex flows (submodules, LFS, sparse checkout) — follow‑up tasks.
+- Replacing AI stubs or unsupported GitHub endpoints.
 
-POST /local/repos/{name}/cherry-pick (sha list)
+---
 
-GET /local/repos/{name}/log (limit, author filter)
+## Test Plan
 
-Commits & Diffs
+- **Unit tests** for `git_service.clone_or_update_repo(...)`:
 
-GET /repos/{name}/commits (remote)
+  - New clone success → directory created, `.git` present, default branch set.
+  - Existing repo fast‑forward success; wrong remote error; dirty tree → returns status without changes; path traversal attempt rejected.
 
-GET /local/repos/{name}/diff (vs target; mode: summary/patch)
+- **Integration test** with temp `REPO_PATH` bind‑mounted:
 
-GET /local/repos/{name}/staged
+  - Start API (compose), call endpoint, assert on filesystem + `git status` from host context.
 
-GET /local/repos/{name}/file/{path} (at ref=HEAD by default)
+---
 
-Branch & PR Management
+## Operational Notes
 
-POST /repos/{name}/branches (create from base)
-
-DELETE /repos/{name}/branches/{branch}
-
-GET /repos/{name}/graph (compact DAG for UI)
-
-GET /repos/{name}/pulls
-
-POST /repos/{name}/pulls
-
-POST /repos/{name}/branches/{branch}/prune-stale (policy‑based local cleanup)
-
-Issues & Workflow Panel
-
-GET /repos/{name}/issues (filters: assignee, labels, state)
-
-GET /repos/{name}/tasks/recurring
-
-POST /repos/{name}/tasks/recurring
-
-POST /repos/{name}/tasks/recurring/{id}/toggle
-
-CI/CD & Health
-
-GET /repos/{name}/ci/actions/latest
-
-GET /repos/{name}/ci/actions/runs
-
-GET /repos/{name}/ci/coverage
-
-GET /repos/{name}/ci/docker
-
-GET /repos/{name}/health
-
-Notes & Snippets
-
-GET /repos/{name}/notes
-
-POST /repos/{name}/notes
-
-GET /repos/{name}/snippets
-
-POST /repos/{name}/snippets
-
-DELETE /repos/{name}/snippets/{id}
-
-AI Assistant Hooks
-
-POST /repos/{name}/ai/explain-error
-
-POST /repos/{name}/ai/next-step
-
-GET /repos/{name}/ai/daily-brief
-
-Misc
-
-OPTIONS /\* (CORS preflight)
-
-GET /meta/config
+- GitPython requires Git installed; ensure container image and host have `git` binary.
+- Consider UID/GID alignment to avoid file permission friction when mounting host paths.
+- Log structured messages (no secrets); tag logs with repo name and route.
