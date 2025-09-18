@@ -12,6 +12,7 @@ export default function RepositoriesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [githubToken, setGithubToken] = useState("");
+  const [activeToken, setActiveToken] = useState<string | undefined>(undefined);
 
   const fetchRepositories = async (token?: string) => {
     try {
@@ -19,6 +20,7 @@ export default function RepositoriesPage() {
       setError(null);
       const repos = await apiClient.getRepositories(token);
       setRepositories(repos);
+      setActiveToken(token);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to fetch repositories"
@@ -34,9 +36,8 @@ export default function RepositoriesPage() {
 
   const handleTokenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (githubToken.trim()) {
-      fetchRepositories(githubToken.trim());
-    }
+    const trimmedToken = githubToken.trim();
+    fetchRepositories(trimmedToken ? trimmedToken : undefined);
   };
 
   return (
@@ -95,7 +96,7 @@ export default function RepositoriesPage() {
         {error && (
           <ErrorMessage
             message={error}
-            onRetry={() => fetchRepositories(githubToken || undefined)}
+            onRetry={() => fetchRepositories(activeToken)}
           />
         )}
 
@@ -133,7 +134,11 @@ export default function RepositoriesPage() {
             </div>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {repositories.map((repo) => (
-                <RepositoryCard key={repo.full_name} repository={repo} />
+                <RepositoryCard
+                  key={repo.full_name}
+                  repository={repo}
+                  token={activeToken}
+                />
               ))}
             </div>
           </div>

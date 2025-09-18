@@ -7,3 +7,7 @@ export interface Repository {
 export interface ApiError {
   detail: string;
 }
+
+export interface ReadmeResponse {
+  content: string;
+}
