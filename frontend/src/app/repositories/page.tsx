@@ -12,6 +12,7 @@ export default function RepositoriesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [githubToken, setGithubToken] = useState("");
+  const [activeToken, setActiveToken] = useState<string | undefined>(undefined);
 
   const fetchRepositories = async (token?: string) => {
     try {
@@ -19,6 +20,7 @@ export default function RepositoriesPage() {
       setError(null);
       const repos = await apiClient.getRepositories(token);
       setRepositories(repos);
+      setActiveToken(token);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to fetch repositories"
@@ -34,33 +36,32 @@ export default function RepositoriesPage() {
 
   const handleTokenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (githubToken.trim()) {
-      fetchRepositories(githubToken.trim());
-    }
+    const trimmedToken = githubToken.trim();
+    fetchRepositories(trimmedToken ? trimmedToken : undefined);
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
+    <div className="min-h-screen bg-gray-900 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-3xl font-bold text-white mb-2">
             GitHub Repositories
           </h1>
-          <p className="text-gray-600">
+          <p className="text-gray-300">
             View and manage your GitHub repositories
           </p>
         </div>
 
         {/* GitHub Token Input */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+        <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-lg font-semibold text-white mb-4">
             GitHub Authentication
           </h2>
           <form onSubmit={handleTokenSubmit} className="flex gap-4">
             <div className="flex-1">
               <label
                 htmlFor="github-token"
-                className="block text-sm font-medium text-gray-700 mb-2"
+                className="block text-sm font-medium text-gray-300 mb-2"
               >
                 GitHub Personal Access Token
               </label>
@@ -70,9 +71,9 @@ export default function RepositoriesPage() {
                 value={githubToken}
                 onChange={(e) => setGithubToken(e.target.value)}
                 placeholder="Enter your GitHub token (optional)"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-gray-600 bg-gray-700 text-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 placeholder-gray-400"
               />
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-gray-400">
                 Leave empty to use environment variable or provide your token
                 for authentication
               </p>
@@ -95,12 +96,12 @@ export default function RepositoriesPage() {
         {error && (
           <ErrorMessage
             message={error}
-            onRetry={() => fetchRepositories(githubToken || undefined)}
+            onRetry={() => fetchRepositories(activeToken)}
           />
         )}
 
         {!loading && !error && repositories.length === 0 && (
-          <div className="bg-white rounded-lg shadow-md p-12 text-center">
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-12 text-center">
             <svg
               className="w-16 h-16 text-gray-400 mx-auto mb-4"
               fill="none"
@@ -115,10 +116,10 @@ export default function RepositoriesPage() {
                 d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
               />
             </svg>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
+            <h3 className="text-lg font-medium text-white mb-2">
               No repositories found
             </h3>
-            <p className="text-gray-600">
+            <p className="text-gray-300">
               Make sure you have a valid GitHub token and try again.
             </p>
           </div>
@@ -127,13 +128,17 @@ export default function RepositoriesPage() {
         {!loading && !error && repositories.length > 0 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">
+              <h2 className="text-xl font-semibold text-white">
                 Your Repositories ({repositories.length})
               </h2>
             </div>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {repositories.map((repo) => (
-                <RepositoryCard key={repo.full_name} repository={repo} />
+              {repositories.map((repo, index) => (
+                <RepositoryCard
+                  key={repo.full_name || repo.name || `repo-${index}`}
+                  repository={repo}
+                  token={activeToken}
+                />
               ))}
             </div>
           </div>

@@ -1,41 +1,74 @@
+import Link from "next/link";
 import { Repository } from "@/types/repository";
+import { useEffect, useRef } from "react";
 
 interface RepositoryCardProps {
   repository: Repository;
+  token?: string;
 }
 
-export default function RepositoryCard({ repository }: RepositoryCardProps) {
+export default function RepositoryCard({ repository, token }: RepositoryCardProps) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  
+  const readmeHref = token
+    ? `/repositories/${encodeURIComponent(repository.name)}/readme?token=${encodeURIComponent(token)}`
+    : `/repositories/${encodeURIComponent(repository.name)}/readme`;
+
+  const formatLastUpdated = (dateString?: string) => {
+    if (!dateString) return "Unknown";
+    return new Date(dateString).toLocaleDateString();
+  };
+
+  useEffect(() => {
+    // Trigger the card enter animation
+    const timer = setTimeout(() => {
+      if (cardRef.current) {
+        cardRef.current.classList.add('card-enter-active');
+      }
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
-    <div className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 p-6 border border-gray-200">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            {repository.name}
-          </h3>
-          <p className="text-sm text-gray-600 mb-4">{repository.full_name}</p>
-        </div>
-        <div className="flex-shrink-0 ml-4">
-          <a
-            href={repository.html_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
-          >
-            View on GitHub
-            <svg
-              className="ml-2 -mr-1 w-4 h-4"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-              xmlns="http://www.w3.org/2000/svg"
+    <div ref={cardRef} className="flex flex-col bg-gray-800/50 border border-gray-700 rounded-lg p-6 shadow-lg hover:shadow-blue-500/20 hover:border-blue-500/50 transition-all duration-200 card-enter">
+      {/* Card Body */}
+      <div className="flex-grow">
+        {/* Header */}
+        <div className="flex justify-between items-start mb-4">
+          <h3 className="text-lg font-semibold text-white">
+            <a
+              href={repository.html_url || `https://github.com/${repository.name}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-blue-400 transition-colors duration-200"
             >
-              <path
-                fillRule="evenodd"
-                d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </a>
+              {repository.name}
+            </a>
+          </h3>
+          {repository.language && (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-900/50 text-blue-300 border border-blue-700/50">
+              {repository.language}
+            </span>
+          )}
         </div>
+
+        {/* Description */}
+        <p className="text-gray-300 text-sm min-h-[40px] mb-4">
+          {repository.description || "No description provided."}
+        </p>
+      </div>
+
+      {/* Card Footer */}
+      <div className="border-t border-gray-700 pt-4 flex items-center">
+        <div className="flex items-center space-x-4 text-xs text-gray-400">
+          <span className="capitalize">{repository.visibility}</span>
+          <span>•</span>
+          <span>{repository.default_branch}</span>
+        </div>
+        <span className="ml-auto text-xs text-gray-400">
+          Updated {formatLastUpdated(repository.updated_at)}
+        </span>
       </div>
     </div>
   );
