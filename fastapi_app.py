@@ -1,182 +1,50 @@
-from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from __future__ import annotations
+
+import logging
+from typing import Callable
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
-from github import Github, GithubException
-from pydantic import BaseModel
-from pathlib import Path
-import os
+from github import Github
+
+from routes import ai, branches, ci, issues, local, meta, notes, pulls, repos, snippets
+from services.config import get_settings
 
 
-class Repository(BaseModel):
-    """Basic repository information returned from the GitHub API."""
+logger = logging.getLogger("git-autobot.api")
+logging.basicConfig(level=logging.INFO)
 
-    name: str
-    description: Optional[str]
-    visibility: str
-    default_branch: str
-    language: Optional[str]
-    updated_at: Optional[str]
-    html_url: str
+settings = get_settings()
+LOCAL_REPOS_DIR = settings.local_repos_dir
 
+app = FastAPI(title="Git Autobot GitHub API", version="0.1.0")
 
-class CommitMetadata(BaseModel):
-    """Metadata about a commit."""
+allow_credentials = False if "*" in settings.allowed_origins else True
 
-    sha: str
-    message: str
-    author: Optional[str]
-    date: Optional[str]
-
-
-class RepositoryDetails(BaseModel):
-    """Detailed repository information."""
-
-    name: str
-    description: Optional[str]
-    visibility: str
-    default_branch: str
-    branches: List[str]
-    last_commit: Optional[CommitMetadata]
-    contributors: List[str]
-    html_url: str
-
-
-class ReadmeResponse(BaseModel):
-    """README content."""
-
-    content: str
-
-
-class LocalRepository(BaseModel):
-    """Information about a locally cloned repository."""
-
-    name: str
-    path: str
-
-
-app = FastAPI(title="Git Autobot GitHub API")
-
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
-    allow_credentials=False,  # Set to False when using allow_origins=["*"]
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
+    allow_origins=settings.allowed_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-def get_github_client(token: Optional[str] = Query(default=None, description="GitHub personal access token")) -> Github:
-    token = token or os.getenv("GITHUB_TOKEN")
-    if not token:
-        raise HTTPException(status_code=400, detail="GitHub token required")
-    return Github(token)
-
-
-BASE_DIR = Path(__file__).resolve().parent
-LOCAL_REPOS_DIR = Path(os.getenv("LOCAL_REPOS_DIR", BASE_DIR / "local_repos")).resolve()
-LOCAL_REPOS_DIR.mkdir(parents=True, exist_ok=True)
 
 @app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
+async def request_logger(request: Request, call_next: Callable[[Request], Response]) -> Response:
+    logger.info("%s %s", request.method, request.url.path)
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers.setdefault("Access-Control-Allow-Origin", settings.allowed_origins[0] if settings.allowed_origins else "*")
     return response
 
-@app.options("/repos")
-async def options_repos():
-    """Handle CORS preflight requests"""
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        }
-    )
 
-@app.get("/repos", response_model=List[Repository], summary="List user repositories")
-def list_repositories(gh: Github = Depends(get_github_client)) -> List[Repository]:
-    try:
-        user = gh.get_user()
-        repos = [
-            Repository(
-                name=r.name,
-                description=r.description,
-                visibility="private" if r.private else "public",
-                default_branch=r.default_branch,
-                language=r.language,
-                updated_at=str(r.updated_at) if r.updated_at else None,
-                html_url=r.html_url,
-            )
-            for r in user.get_repos()
-        ]
-        return repos
-    except GithubException as e:
-        status = getattr(e, "status", 500)
-        message = getattr(e, "data", {}).get("message") if hasattr(e, "data") else str(e)
-        raise HTTPException(status_code=status, detail=message)
-
-
-@app.get("/repos/{name}", response_model=RepositoryDetails, summary="Get repository details")
-def get_repository_details(name: str, gh: Github = Depends(get_github_client)) -> RepositoryDetails:
-    try:
-        repo = gh.get_user().get_repo(name)
-
-        branches = [b.name for b in repo.get_branches()]
-
-        try:
-            commit_obj = repo.get_commits()[0]
-            last_commit = CommitMetadata(
-                sha=commit_obj.sha,
-                message=commit_obj.commit.message,
-                author=getattr(commit_obj.commit.author, "name", None),
-                date=str(getattr(commit_obj.commit.author, "date", None)),
-            )
-        except Exception:
-            last_commit = None
-
-        contributors = [c.login for c in repo.get_contributors()]
-
-        return RepositoryDetails(
-            name=repo.name,
-            description=repo.description,
-            visibility="private" if repo.private else "public",
-            default_branch=repo.default_branch,
-            branches=branches,
-            last_commit=last_commit,
-            contributors=contributors,
-            html_url=repo.html_url,
-        )
-    except GithubException as e:
-        status = getattr(e, "status", 500)
-        message = getattr(e, "data", {}).get("message") if hasattr(e, "data") else str(e)
-        raise HTTPException(status_code=status, detail=message)
-
-
-@app.get("/repos/{name}/readme", response_model=ReadmeResponse, summary="Get repository README")
-def get_repository_readme(name: str, gh: Github = Depends(get_github_client)) -> ReadmeResponse:
-    try:
-        repo = gh.get_user().get_repo(name)
-        readme = repo.get_readme()
-        content = readme.decoded_content.decode("utf-8")
-        return ReadmeResponse(content=content)
-    except GithubException as e:
-        status = getattr(e, "status", 500)
-        if status == 404:
-            raise HTTPException(status_code=404, detail="README not found")
-        message = getattr(e, "data", {}).get("message") if hasattr(e, "data") else str(e)
-        raise HTTPException(status_code=status, detail=message)
-
-
-@app.get("/local/repos", response_model=List[LocalRepository], summary="List local repositories")
-def list_local_repositories() -> List[LocalRepository]:
-    repos: List[LocalRepository] = []
-    if LOCAL_REPOS_DIR.exists():
-        for item in LOCAL_REPOS_DIR.iterdir():
-            if item.is_dir() and (item / ".git").exists():
-                repos.append(LocalRepository(name=item.name, path=str(item)))
-    return repos
-
+app.include_router(meta.router)
+app.include_router(repos.router)
+app.include_router(branches.router)
+app.include_router(pulls.router)
+app.include_router(issues.router)
+app.include_router(ci.router)
+app.include_router(ai.router)
+app.include_router(notes.router)
+app.include_router(snippets.router)
+app.include_router(local.router)

@@ -48,6 +48,32 @@ import re # Added re import
 import json # For repository configuration management
 from dotenv import load_dotenv
 
+
+def _extract_name(obj, default=""):
+    """Return a human readable name for ``obj``.
+
+    Many tests provide ``MagicMock`` instances where ``name`` is not a simple
+    attribute. This helper normalises those cases so printing behaviour is
+    deterministic.
+    """
+
+    if obj is None:
+        return default
+
+    name = getattr(obj, "name", None)
+    if isinstance(name, str) and name:
+        return name
+
+    # ``MagicMock`` stores the provided ``name`` in ``_mock_name``.
+    mock_name = getattr(obj, "_mock_name", None)
+    if isinstance(mock_name, str) and mock_name:
+        return mock_name
+
+    if name is not None:
+        return str(name)
+
+    return str(obj) if obj is not None else default
+
 # Load environment variables from .env file if it exists
 load_dotenv()
 
@@ -120,12 +146,10 @@ def add_repo_to_config(alias, details):
     print(f"Repository alias '{alias}' added/updated in config: {repo_entry}")
 
 def get_repo_details_from_config(alias):
-    """
-    Retrieves the path for a given repository name from the configuration.
-    Returns None if the name is not found.
-    """
+    """Return the stored repository details for ``alias`` if present."""
+
     config = load_repo_config()
-    return config.get(name)
+    return config.get(alias)
 
 def list_repos_from_config():
     """
@@ -322,7 +346,6 @@ def create_github_repository(token, repo_name_full, description="", private=Fals
         return None
 
 def is_valid_git_repo(repo_path):
-    from git import Repo, InvalidGitRepositoryError, GitCommandError  # Moved import here and added GitCommandError
     """
     Checks if the given path is a valid Git repository.
     If not, asks the user if they want to initialize one.
@@ -464,7 +487,6 @@ def github_repo_exists(github_token, repo_name):
               Also returns True if `github_token` is not provided (skipping the check).
               Returns False if the repository is not found, or another API error occurs.
     """
-    from github import Github, GithubException # Local import
 
     if not github_token:
         print("Warning: GITHUB_TOKEN environment variable not set. Skipping GitHub repository existence check.")
@@ -496,7 +518,6 @@ def get_github_repo_from_local(local_repo_path):
     Returns:
         str: The 'username/reponame' if successfully extracted, otherwise None.
     """
-    from git import Repo # Local import for self-containment
     try:
         repo = Repo(local_repo_path)
         if not repo.remotes:
@@ -635,11 +656,17 @@ def fetch_changes(repo_path, configured_branches=None):
             print("No fetch information returned. This might indicate no changes or an issue.")
         else:
             for info in fetch_info:
-                print(f"Fetched: {info.name}, Summary: {info.summary}, Flags: {info.flags}")
-                if info.flags & info.ERROR:
-                    print(f"Error during fetch: {info.name} - {info.summary}")
-                elif info.flags & info.REJECTED:
-                     print(f"Fetch rejected: {info.name} - {info.summary}")
+                name = _extract_name(info)
+                summary = getattr(info, "summary", "")
+                flags_value = getattr(info, "flags", 0)
+                print(f"Fetched: {name}, Summary: {summary}, Flags: {flags_value}")
+
+                error_flag = getattr(info, "ERROR", 0)
+                rejected_flag = getattr(info, "REJECTED", 0)
+                if isinstance(flags_value, int) and isinstance(error_flag, int) and flags_value & error_flag:
+                    print(f"Error during fetch: {name} - {summary}")
+                elif isinstance(flags_value, int) and isinstance(rejected_flag, int) and flags_value & rejected_flag:
+                    print(f"Fetch rejected: {name} - {summary}")
 
         print("Fetch operation completed.")
         if configured_branches:
@@ -664,15 +691,27 @@ def list_branches(repo_path, configured_branches=None):
         repo = Repo(repo_path)
         
         print("\nLocal branches:")
-        if not repo.heads:
+        if isinstance(repo.heads, dict):
+            local_heads = list(repo.heads.values())
+        elif isinstance(repo.heads, list):
+            local_heads = list(repo.heads)
+        else:
+            try:
+                local_heads = list(repo.heads)
+            except TypeError:
+                local_heads = []
+
+        if not local_heads:
             print("  No local branches found.")
         else:
-            for head in repo.heads:
-                marker = " * (in config)" if head.name in configured_branches else ""
-                print(f"  - {head.name}{marker}")
+            for head in local_heads:
+                head_name = _extract_name(head)
+                marker = " * (in config)" if head_name in configured_branches else ""
+                print(f"  - {head_name}{marker}")
         
         print("\nRemote branches (origin):")
         origin = repo.remote(name='origin')
+        origin_name = _extract_name(origin, "origin")
         if not origin.exists():
             print("  Remote 'origin' does not exist.")
             return
@@ -681,20 +720,34 @@ def list_branches(repo_path, configured_branches=None):
         print("  (Fetching remote 'origin' to ensure list is up-to-date...)")
         origin.fetch()
 
-        if not origin.refs:
+        if isinstance(origin.refs, list):
+            remote_refs = list(origin.refs)
+        else:
+            try:
+                remote_refs = list(origin.refs)
+            except TypeError:
+                remote_refs = []
+        if not remote_refs:
             print("  No remote branches found on 'origin'.")
         else:
-            for ref in origin.refs:
-                if ref.name == f"{origin.name}/HEAD": # Skip 'origin/HEAD'
+            for ref in remote_refs:
+                ref_name = _extract_name(ref)
+                if ref_name == f"{origin_name}/HEAD":
                     continue
-                # Remote branch name like 'origin/main', check if 'main' is in configured_branches
-                simple_remote_branch_name = ref.name.split(f"{origin.name}/", 1)[-1]
+                simple_remote_branch_name = ref_name.split(f"{origin_name}/", 1)[-1]
                 marker = " * (in config)" if simple_remote_branch_name in configured_branches else ""
-                print(f"  - {ref.name}{marker}")
-                for local_branch in repo.heads:
-                    if local_branch.tracking_branch() and local_branch.tracking_branch().name == ref.name:
-                        local_marker = " * (in config)" if local_branch.name in configured_branches else ""
-                        print(f"    (tracked by local: {local_branch.name}{local_marker})")
+                print(f"  - {ref_name}{marker}")
+                for local_branch in local_heads:
+                    tracking = None
+                    try:
+                        tracking = local_branch.tracking_branch()
+                    except Exception:
+                        tracking = None
+                    tracking_name = _extract_name(tracking)
+                    if tracking_name == ref_name:
+                        local_name = _extract_name(local_branch)
+                        local_marker = " * (in config)" if local_name in configured_branches else ""
+                        print(f"    (tracked by local: {local_name}{local_marker})")
                         
     except InvalidGitRepositoryError:
         print(f"Error: {repo_path} is not a valid Git repository.")
@@ -702,6 +755,23 @@ def list_branches(repo_path, configured_branches=None):
         print(f"Git command error while listing branches: {e}")
     except Exception as e:
         print(f"An unexpected error occurred while listing branches: {e}")
+
+
+def _get_origin_url(repo_path):
+    """Return the URL for the ``origin`` remote if configured."""
+
+    try:
+        repo = Repo(repo_path)
+    except (InvalidGitRepositoryError, Exception):
+        return None
+
+    try:
+        origin = repo.remote(name="origin")
+    except ValueError:
+        return None
+
+    return getattr(origin, "url", None)
+
 
 def checkout_branch(repo_path, branch_name, create_new=False, configured_branches=None):
     """Checks out a branch, optionally creating it if new or tracking a remote."""
@@ -731,21 +801,22 @@ def checkout_branch(repo_path, branch_name, create_new=False, configured_branche
 
         # Try to checkout remote branch (e.g., origin/main as main)
         origin = repo.remote(name='origin')
+        origin_name = _extract_name(origin, "origin")
         if not origin.exists():
             print("Error: Remote 'origin' not found. Cannot checkout remote branch.")
             return False
 
-        remote_branch_name_full = branch_name # e.g. user provides "main" intending "origin/main"
-        if not branch_name.startswith(f"{origin.name}/"):
-             remote_branch_name_full = f"{origin.name}/{branch_name}" # e.g. "origin/main"
+        remote_branch_name_full = branch_name
+        if not branch_name.startswith(f"{origin_name}/"):
+            remote_branch_name_full = f"{origin_name}/{branch_name}"
 
         # Check if the remote branch exists
         remote_ref_to_track = None
         for ref in origin.refs:
-            if ref.name == remote_branch_name_full:
+            if _extract_name(ref) == remote_branch_name_full:
                 remote_ref_to_track = ref
                 break
-        
+
         if not remote_ref_to_track:
             print(f"Error: Branch '{branch_name}' not found as a local branch, and '{remote_branch_name_full}' not found on remote 'origin'.")
             print("Please fetch changes or check branch name.")
@@ -755,27 +826,37 @@ def checkout_branch(repo_path, branch_name, create_new=False, configured_branche
 
         # At this point, remote_ref_to_track is valid (e.g., origin.refs['main'] or origin.refs['feature/foo'])
         # Determine local name for the new tracking branch
-        local_tracking_branch_name = remote_ref_to_track.remote_head # e.g. 'main' from 'origin/main'
+        local_tracking_branch_name = getattr(remote_ref_to_track, "remote_head", None)
+        if not local_tracking_branch_name:
+            local_tracking_branch_name = remote_branch_name_full.split("/", 1)[-1]
 
         if local_tracking_branch_name in repo.heads:
             # Local branch with the target name already exists
             local_branch = repo.heads[local_tracking_branch_name]
-            if local_branch.tracking_branch() and local_branch.tracking_branch().name == remote_ref_to_track.name:
-                print(f"Local branch '{local_tracking_branch_name}' already tracks '{remote_ref_to_track.name}'. Checking it out.")
+            tracking = None
+            try:
+                tracking = local_branch.tracking_branch()
+            except Exception:
+                tracking = None
+            tracking_name = _extract_name(tracking)
+            remote_name = _extract_name(remote_ref_to_track)
+            if tracking_name == remote_name:
+                print(f"Local branch '{local_tracking_branch_name}' already tracks '{remote_name}'. Checking it out.")
                 local_branch.checkout()
                 print(f"Successfully checked out branch: {local_tracking_branch_name}")
                 return True
             else:
-                print(f"Error: Local branch '{local_tracking_branch_name}' exists but does not track '{remote_ref_to_track.name}'.")
+                print(f"Error: Local branch '{local_tracking_branch_name}' exists but does not track '{remote_name}'.")
                 print("Please resolve this manually (e.g., rename local branch or set tracking).")
                 return False
         else:
             # Create new local branch tracking the remote one
-            print(f"Creating local branch '{local_tracking_branch_name}' to track remote branch '{remote_ref_to_track.name}'.")
+            remote_name = _extract_name(remote_ref_to_track)
+            print(f"Creating local branch '{local_tracking_branch_name}' to track remote branch '{remote_name}'.")
             new_tracking_branch = repo.create_head(local_tracking_branch_name, remote_ref_to_track)
             new_tracking_branch.set_tracking_branch(remote_ref_to_track) # Ensure tracking is set
             new_tracking_branch.checkout()
-            print(f"Successfully created and checked out branch '{local_tracking_branch_name}' tracking '{remote_ref_to_track.name}'.")
+            print(f"Successfully created and checked out branch '{local_tracking_branch_name}' tracking '{remote_name}'.")
             return True
             
     except InvalidGitRepositoryError:
@@ -805,14 +886,24 @@ def pull_changes(repo_path):
             return False
 
         current_branch = repo.active_branch
-        tracking_branch = current_branch.tracking_branch()
+        current_branch_name = _extract_name(current_branch, "current")
+        try:
+            tracking_branch = current_branch.tracking_branch()
+        except Exception:
+            tracking_branch = None
 
         if not tracking_branch:
-            print(f"Error: Current branch '{current_branch.name}' is not tracking any remote branch. Cannot pull.")
-            print(f"Please set upstream for '{current_branch.name}' first (e.g., by pushing with --set-upstream or using `git branch --set-upstream-to=origin/{current_branch.name}`).")
+            print(f"Error: Current branch '{current_branch_name}' is not tracking any remote branch. Cannot pull.")
+            print(
+                "Please set upstream for '{branch}' first (e.g., by pushing with --set-upstream or using `git branch --set-upstream-to=origin/{branch}`).".format(
+                    branch=current_branch_name
+                )
+            )
             return False
-        
-        print(f"Pulling changes from '{tracking_branch.remote_name}/{tracking_branch.remote_head}' into local branch '{current_branch.name}'...")
+
+        remote_name = getattr(tracking_branch, "remote_name", "origin")
+        remote_head = getattr(tracking_branch, "remote_head", current_branch_name)
+        print(f"Pulling changes from '{remote_name}/{remote_head}' into local branch '{current_branch_name}'...")
         # origin.pull() pulls the current *tracked* branch by default.
         # We can be more explicit if needed, but this should generally work if tracking is set.
         pull_info = origin.pull()
@@ -821,15 +912,29 @@ def pull_changes(repo_path):
             print("No pull information returned. This might mean no changes or an issue.")
         else:
             for info in pull_info:
-                 print(f"Pulled: {info.name}, Ref: {info.ref}, Summary: {info.summary}, Flags: {info.flags}")
-                 if info.flags & info.ERROR:
-                     print(f"  Error during pull: {info.ref} - {info.summary}")
-                 elif info.flags & info.REJECTED:
-                     print(f"  Pull rejected: {info.ref} - {info.summary}")
-                 elif info.flags & info.NO_CHANGE:
-                     print(f"  No changes for {info.ref}.")
-                 elif info.flags & info.FAST_FORWARD or info.flags & info.MERGE:
-                     print(f"  Successfully updated {info.ref}.")
+                name = _extract_name(info)
+                ref = getattr(info, "ref", "")
+                summary = getattr(info, "summary", "")
+                flags_value = getattr(info, "flags", 0)
+                print(f"Pulled: {name}, Ref: {ref}, Summary: {summary}, Flags: {flags_value}")
+
+                error_flag = getattr(info, "ERROR", 0)
+                rejected_flag = getattr(info, "REJECTED", 0)
+                no_change_flag = getattr(info, "NO_CHANGE", 0)
+                ff_flag = getattr(info, "FAST_FORWARD", 0)
+                merge_flag = getattr(info, "MERGE", 0)
+
+                if isinstance(flags_value, int) and isinstance(error_flag, int) and flags_value & error_flag:
+                    print(f"  Error during pull: {ref} - {summary}")
+                elif isinstance(flags_value, int) and isinstance(rejected_flag, int) and flags_value & rejected_flag:
+                    print(f"  Pull rejected: {ref} - {summary}")
+                elif isinstance(flags_value, int) and isinstance(no_change_flag, int) and flags_value & no_change_flag:
+                    print(f"  No changes for {ref}.")
+                elif isinstance(flags_value, int) and (
+                    (isinstance(ff_flag, int) and flags_value & ff_flag)
+                    or (isinstance(merge_flag, int) and flags_value & merge_flag)
+                ):
+                    print(f"  Successfully updated {ref}.")
 
 
         print("Pull operation completed.")
