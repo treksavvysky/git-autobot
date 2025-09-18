@@ -1,5 +1,7 @@
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from github import Github, GithubException
 from pydantic import BaseModel
 from pathlib import Path
@@ -52,10 +54,16 @@ class LocalRepository(BaseModel):
 
 app = FastAPI(title="Git Autobot GitHub API")
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=False,  # Set to False when using allow_origins=["*"]
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
 
-def get_github_client(
-    token: Optional[str] = Query(default=None, description="GitHub personal access token")
-) -> Github:
+def get_github_client(token: Optional[str] = Query(default=None, description="GitHub personal access token")) -> Github:
     token = token or os.getenv("GITHUB_TOKEN")
     if not token:
         raise HTTPException(status_code=400, detail="GitHub token required")
@@ -66,6 +74,25 @@ BASE_DIR = Path(__file__).resolve().parent
 LOCAL_REPOS_DIR = Path(os.getenv("LOCAL_REPOS_DIR", BASE_DIR.parent / "local_repos")).resolve()
 LOCAL_REPOS_DIR.mkdir(parents=True, exist_ok=True)
 
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+@app.options("/repos")
+async def options_repos():
+    """Handle CORS preflight requests"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 @app.get("/repos", response_model=List[Repository], summary="List user repositories")
 def list_repositories(gh: Github = Depends(get_github_client)) -> List[Repository]:

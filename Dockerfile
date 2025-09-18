@@ -10,5 +10,14 @@ RUN uv pip install --system -r requirements.txt
 
 COPY . .
 
+# Create a non-root user
+RUN adduser --disabled-password --gecos '' appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8000
+
+# Use environment variable for GitHub token
+ENV GITHUB_TOKEN=""
+
 CMD ["uv", "run", "uvicorn", "fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -5,18 +5,21 @@ A powerful developer CLI tool to streamline git workflows and repository managem
 ## Features
 
 ### 🏗️ **Modular Architecture**
+
 - **Repository Management**: Add, remove, list, and configure multiple repositories
 - **Git Operations**: Comprehensive git workflow automation
 - **Rich CLI**: Beautiful, interactive command-line interface with help and completion
 - **Flexible Targeting**: Work with repositories via aliases, paths, or current directory
 
 ### 🗂️ **Repository Management**
+
 - Store and manage multiple repository configurations
 - Auto-detect GitHub repository information
 - Track important branches per repository
 - Rich tabular display of repository information
 
 ### 🔄 **Git Operations**
+
 - Repository status with beautiful formatting
 - Branch management and visualization
 - Commit, push, pull operations
@@ -34,6 +37,7 @@ uv pip install -e .
 ## Quick Start
 
 ### 1. Add a Repository
+
 ```bash
 # Add current directory
 git-autobot repo add my-project . --desc "My awesome project"
@@ -43,11 +47,13 @@ git-autobot repo add my-api /path/to/api --github user/api-repo --branches "main
 ```
 
 ### 2. List Repositories
+
 ```bash
 git-autobot repo list
 ```
 
 ### 3. Git Operations
+
 ```bash
 # Check status of current repo
 git-autobot git status
@@ -66,15 +72,16 @@ git-autobot git sync --message "Update from local changes"
 
 ### Repository Management (`git-autobot repo`)
 
-| Command | Description |
-|---------|-------------|
-| `add <alias> <path>` | Add repository to configuration |
-| `remove <alias>` | Remove repository from configuration |
-| `list` | List all configured repositories |
-| `show <alias>` | Show detailed repository information |
-| `update <alias>` | Update repository configuration |
+| Command              | Description                          |
+| -------------------- | ------------------------------------ |
+| `add <alias> <path>` | Add repository to configuration      |
+| `remove <alias>`     | Remove repository from configuration |
+| `list`               | List all configured repositories     |
+| `show <alias>`       | Show detailed repository information |
+| `update <alias>`     | Update repository configuration      |
 
 **Add Command Options:**
+
 - `--github, -g`: GitHub repository name (user/repo)
 - `--branches, -b`: Important branches (comma-separated)
 - `--url, -u`: Git remote URL
@@ -82,24 +89,26 @@ git-autobot git sync --message "Update from local changes"
 
 ### Git Operations (`git-autobot git`)
 
-| Command | Description |
-|---------|-------------|
-| `status` | Show repository status with rich formatting |
-| `branches` | Display branch information |
-| `add` | Stage all changes |
-| `commit <message>` | Commit with message |
-| `push` | Push to remote |
-| `pull` | Pull from remote |
-| `checkout <branch>` | Checkout branch |
-| `quick-commit <message>` | Stage all + commit + optional push |
-| `sync` | Full sync: commit local changes, pull, push |
+| Command                  | Description                                 |
+| ------------------------ | ------------------------------------------- |
+| `status`                 | Show repository status with rich formatting |
+| `branches`               | Display branch information                  |
+| `add`                    | Stage all changes                           |
+| `commit <message>`       | Commit with message                         |
+| `push`                   | Push to remote                              |
+| `pull`                   | Pull from remote                            |
+| `checkout <branch>`      | Checkout branch                             |
+| `quick-commit <message>` | Stage all + commit + optional push          |
+| `sync`                   | Full sync: commit local changes, pull, push |
 
 **Targeting Options (available for all git commands):**
+
 - `--alias, -a`: Use configured repository alias
 - `--path, -p`: Use direct repository path
-- *(no option)*: Use current directory if it's a git repository
+- _(no option)_: Use current directory if it's a git repository
 
 **Additional Options:**
+
 - `commit --add`: Stage all changes before committing
 - `checkout --create, -c`: Create branch if it doesn't exist
 - `quick-commit --push`: Push after committing
@@ -108,6 +117,7 @@ git-autobot git sync --message "Update from local changes"
 ## Examples
 
 ### Setting Up Multiple Projects
+
 ```bash
 # Add your main projects
 git-autobot repo add frontend ~/projects/my-app-frontend --github myorg/frontend
@@ -119,6 +129,7 @@ git-autobot repo list
 ```
 
 ### Daily Workflow
+
 ```bash
 # Check status of all your projects
 git-autobot git status --alias frontend
@@ -135,6 +146,7 @@ git-autobot git branches --alias backend
 ```
 
 ### Repository Management
+
 ```bash
 # Update repository info
 git-autobot repo update frontend --branches "main,develop,feature/new-ui"
@@ -209,30 +221,143 @@ Current version: **0.2.0**
 - Rich >= 13.0.0
 - python-dotenv >= 1.0.0
 
-## FastAPI GitHub API
+## Web Interface
 
-A simple FastAPI application is included to list your GitHub repositories using your personal access token.
+Git Autobot now includes a modern web interface built with Next.js and FastAPI.
 
-### Local Development
+### Architecture
 
-1. Install dependencies:
+- **Backend**: FastAPI server (`fastapi_app.py`) providing GitHub repository API
+- **Frontend**: Next.js 15 application with TypeScript and Tailwind CSS
+- **Features**: Modern UI, responsive design, GitHub token authentication
+
+### Quick Start
+
+#### Option 1: Docker Compose (Recommended)
+
+1. **Set up environment variables**:
+
    ```bash
-   uv pip install -r requirements.txt
+   cp .env.example .env
+   # Edit .env and add your GitHub token
+   nano .env
    ```
-2. Run the server:
+
+2. **Start with Docker Compose**:
+
    ```bash
-   uv run uvicorn fastapi_app:app --reload
+   # Development mode (with hot reload)
+   ./docker-run.sh dev
+
+   # Or production mode
+   ./docker-run.sh prod
    ```
-3. Open your browser at `http://127.0.0.1:8000/docs` to explore the API via Swagger UI.
 
-### Docker
+3. **Access the application**:
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000
+   - API Documentation: http://localhost:8000/docs
 
-1. Build the image:
+#### Option 2: Local Development
+
+1. **Start both servers** (recommended):
+
+   ```bash
+   ./start-dev.sh
+   ```
+
+   This will start both the FastAPI backend and Next.js frontend.
+
+2. **Or start individually**:
+
+   **Backend**:
+
+   ```bash
+   uv run uvicorn fastapi_app:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+   **Frontend**:
+
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+
+3. **Access the application**:
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000
+   - API Documentation: http://localhost:8000/docs
+
+### Frontend Features
+
+- 🎨 **Modern UI**: Clean, responsive design with Tailwind CSS
+- 🔐 **Authentication**: Secure GitHub token input
+- 📱 **Mobile-First**: Responsive design for all devices
+- ⚡ **Fast**: Built with Next.js 15 and Turbopack
+- 🛡️ **Type-Safe**: Full TypeScript support
+
+### Environment Setup
+
+Create a `.env.local` file in the `frontend/` directory:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+### Docker Deployment
+
+#### Using Docker Compose (Recommended)
+
+The easiest way to run the entire application is using Docker Compose:
+
+```bash
+# Set up environment
+cp .env.example .env
+# Edit .env and add your GitHub token
+
+# Development mode
+./docker-run.sh dev
+
+# Production mode
+./docker-run.sh prod
+```
+
+#### Manual Docker Deployment
+
+1. Build the backend image:
    ```bash
    docker build -t git-autobot-api .
    ```
-2. Run the container (pass your token via environment variable):
+2. Run the container:
    ```bash
    docker run -e GITHUB_TOKEN=your_token -p 8000:8000 git-autobot-api
    ```
-3. Visit `http://localhost:8000/docs` for the interactive API documentation.
+3. Deploy the frontend to Vercel, Netlify, or your preferred platform.
+
+#### Docker Commands
+
+```bash
+# Start development environment
+./docker-run.sh dev
+
+# Start production environment
+./docker-run.sh prod
+
+# View logs
+./docker-run.sh logs
+
+# Stop services
+./docker-run.sh stop
+
+# Clean up
+./docker-run.sh clean
+```
+
+For detailed Docker setup instructions, see [DOCKER.md](DOCKER.md).
+
+### API Endpoints
+
+- `GET /repos` - List user repositories
+  - Query parameter: `token` (optional GitHub Personal Access Token)
+  - Returns: Array of repository objects with name, full_name, and html_url
