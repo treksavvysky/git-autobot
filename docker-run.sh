@@ -5,6 +5,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLI_REPO_PATH=""
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -27,6 +30,45 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+resolve_repo_path() {
+    local chosen_path=""
+
+    if [ -n "$CLI_REPO_PATH" ]; then
+        chosen_path="$CLI_REPO_PATH"
+    elif [ -n "${REPO_PATH:-}" ]; then
+        chosen_path="$REPO_PATH"
+    else
+        if [ -f ".env" ]; then
+            local env_line
+            env_line=$(grep -E '^REPO_PATH=' .env | tail -n1)
+            if [ -n "$env_line" ]; then
+                chosen_path=${env_line#REPO_PATH=}
+                chosen_path=${chosen_path%"}
+                chosen_path=${chosen_path#"}
+            fi
+        fi
+        if [ -z "$chosen_path" ]; then
+            chosen_path="$SCRIPT_DIR/local_repos"
+        fi
+    fi
+
+    if [[ "$chosen_path" == ~* ]]; then
+        chosen_path="${chosen_path/#\~/$HOME}"
+    fi
+    if [[ "$chosen_path" != /* ]]; then
+        chosen_path="$(pwd)/$chosen_path"
+    fi
+
+    mkdir -p "$chosen_path"
+    if ! chosen_path=$(cd "$chosen_path" && pwd); then
+        print_error "Unable to resolve repository path: $chosen_path"
+        exit 1
+    fi
+
+    export REPO_PATH="$chosen_path"
+    print_status "Using repository path: $REPO_PATH"
 }
 
 # Function to check if .env file exists
@@ -58,7 +100,7 @@ check_env_file() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [COMMAND]"
+    echo "Usage: $0 [--repo-path /absolute/path] COMMAND"
     echo ""
     echo "Commands:"
     echo "  dev     Start development environment (with hot reload)"
@@ -69,21 +111,25 @@ show_usage() {
     echo "  clean   Stop services and remove containers/volumes"
     echo "  help    Show this help message"
     echo ""
+    echo "Options:"
+    echo "  --repo-path PATH   Override the host directory for local repository clones"
+    echo ""
     echo "Examples:"
-    echo "  $0 dev     # Start development environment"
-    echo "  $0 prod    # Start production environment"
-    echo "  $0 logs    # View logs"
-    echo "  $0 stop    # Stop all services"
+    echo "  $0 --repo-path /work/repos dev   # Start dev mode with custom clone path"
+    echo "  $0 prod                            # Start production environment"
+    echo "  $0 logs                            # View logs"
+    echo "  $0 stop                            # Stop all services"
 }
 
 # Function to start development environment
 start_dev() {
     print_status "Starting development environment..."
-    
+
     if ! check_env_file; then
         exit 1
     fi
-    
+
+    resolve_repo_path
     docker compose -f docker-compose.dev.yml up --build
 }
 
@@ -94,13 +140,15 @@ start_prod() {
     if ! check_env_file; then
         exit 1
     fi
-    
+
+    resolve_repo_path
     docker compose up --build
 }
 
 # Function to stop services
 stop_services() {
     print_status "Stopping all services..."
+    resolve_repo_path
     docker compose -f docker-compose.dev.yml down 2>/dev/null || true
     docker compose down 2>/dev/null || true
     print_success "All services stopped"
@@ -109,12 +157,14 @@ stop_services() {
 # Function to show logs
 show_logs() {
     print_status "Showing logs for all services..."
+    resolve_repo_path
     docker compose -f docker-compose.dev.yml logs -f 2>/dev/null || docker compose logs -f
 }
 
 # Function to build images
 build_images() {
     print_status "Building Docker images..."
+    resolve_repo_path
     docker compose -f docker-compose.dev.yml build
     print_success "Images built successfully"
 }
@@ -122,11 +172,37 @@ build_images() {
 # Function to clean up
 clean_up() {
     print_status "Cleaning up Docker resources..."
+    resolve_repo_path
     docker compose -f docker-compose.dev.yml down -v 2>/dev/null || true
     docker compose down -v 2>/dev/null || true
     docker system prune -f
     print_success "Cleanup completed"
 }
+
+# Parse global options
+ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --repo-path)
+            CLI_REPO_PATH="$2"
+            shift 2
+            ;;
+        --repo-path=*)
+            CLI_REPO_PATH="${1#*=}"
+            shift 1
+            ;;
+        -r)
+            CLI_REPO_PATH="$2"
+            shift 2
+            ;;
+        *)
+            ARGS+=("$1")
+            shift 1
+            ;;
+    esac
+done
+
+set -- "${ARGS[@]}"
 
 # Main script logic
 case "${1:-help}" in

@@ -22,9 +22,11 @@ def get_settings() -> Settings:
     """Resolve runtime settings from the environment once per process."""
 
     base_dir = Path(__file__).resolve().parent.parent
-    local_repos_dir = Path(
-        os.getenv("LOCAL_REPOS_DIR", base_dir / "local_repos")
-    ).resolve()
+    repo_path_env = os.getenv("REPO_PATH") or os.getenv("LOCAL_REPOS_DIR")
+    if repo_path_env:
+        local_repos_dir = Path(repo_path_env).expanduser().resolve()
+    else:
+        local_repos_dir = (base_dir / "local_repos").resolve()
     local_repos_dir.mkdir(parents=True, exist_ok=True)
 
     allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")

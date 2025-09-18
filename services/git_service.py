@@ -10,6 +10,7 @@ from git import GitCommandError, Repo
 from models import (
     CherryPickRequestBody,
     CloneRepositoryRequest,
+    CloneRepositoryResponse,
     CommitMetadata,
     CommitRequestBody,
     GitCommandResult,
@@ -21,6 +22,8 @@ from models import (
     GitLogResponse,
     GitStatus,
     GitStatusFile,
+    LocalBranchStatus,
+    LocalRemote,
     LocalRepository,
     LocalRepositoryDetail,
     PushRequestBody,
@@ -59,6 +62,26 @@ def _repo_path(name: str) -> Path:
     root = _local_root()
     safe_name = _safe_repo_name(name)
     return root / safe_name
+
+
+def _normalize_remote_candidate(url: str) -> str:
+    candidate = url.strip()
+    if candidate.startswith("http") and not candidate.endswith(".git"):
+        candidate = candidate.rstrip("/") + ".git"
+    return candidate
+
+
+def _discover_default_branch(repo: Repo) -> Optional[str]:
+    try:
+        return repo.active_branch.name  # type: ignore[union-attr]
+    except Exception:
+        try:
+            ref = repo.git.symbolic_ref("refs/remotes/origin/HEAD")
+            if ref.startswith("refs/remotes/"):
+                return "/".join(ref.split("/")[3:])
+        except Exception:
+            return None
+    return None
 
 
 def _open_repo(name: str) -> Repo:
@@ -128,19 +151,208 @@ def get_local_repository(name: str) -> LocalRepositoryDetail:
     )
 
 
-def clone_repository(name: str, payload: CloneRepositoryRequest) -> StubResponse:
-    """Clone repository stub.
+def list_local_remotes(name: str) -> List[LocalRemote]:
+    repo = _open_repo(name)
+    remotes: List[LocalRemote] = []
+    for remote in repo.remotes:
+        remotes.append(LocalRemote(name=remote.name, urls=list(remote.urls)))
+    return remotes
 
-    Cloning from remote is not available in the starter; return stub metadata.
-    """
 
+def list_local_branches(name: str) -> List[LocalBranchStatus]:
+    repo = _open_repo(name)
+    try:
+        active_name = repo.active_branch.name  # type: ignore[union-attr]
+    except Exception:
+        active_name = None
+
+    branches: List[LocalBranchStatus] = []
+    for branch in repo.branches:
+        tracking_name: Optional[str] = None
+        ahead = 0
+        behind = 0
+        try:
+            tracking_ref = branch.tracking_branch()
+        except Exception:
+            tracking_ref = None
+        if tracking_ref is not None:
+            tracking_name = getattr(tracking_ref, "name", str(tracking_ref))
+            try:
+                ahead = sum(1 for _ in repo.iter_commits(f"{tracking_name}..{branch.name}"))
+                behind = sum(1 for _ in repo.iter_commits(f"{branch.name}..{tracking_name}"))
+            except GitCommandError:
+                ahead = behind = 0
+
+        branches.append(
+            LocalBranchStatus(
+                name=branch.name,
+                is_active=branch.name == active_name,
+                tracking=tracking_name,
+                ahead=ahead,
+                behind=behind,
+            )
+        )
+
+    branches.sort(key=lambda item: (0 if item.is_active else 1, item.name.lower()))
+    return branches
+
+
+def clone_repository(name: str, payload: CloneRepositoryRequest) -> CloneRepositoryResponse:
     repo_path = _repo_path(name)
-    return StubResponse(
-        note=(
-            "Clone operation is not yet implemented. Create the repository manually "
-            f"at {repo_path} and the dashboard will pick it up."
-        ),
-        details={"remote_url": payload.remote_url, "path": str(repo_path)},
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
+
+    remote_url = payload.remote_url.strip() if payload.remote_url else None
+    normalized_remote = (
+        _normalize_remote_candidate(remote_url) if remote_url else None
+    )
+
+    created = False
+    updated = False
+    message: Optional[str] = None
+    repo: Optional[Repo] = None
+
+    if not repo_path.exists():
+        if not normalized_remote:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "remote_required",
+                        "message": "Remote URL is required for an initial clone.",
+                        "details": {"name": name},
+                    }
+                },
+            )
+        try:
+            repo = Repo.clone_from(normalized_remote, repo_path)
+            created = True
+            message = "Repository cloned successfully."
+        except GitCommandError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "clone_failed",
+                        "message": str(exc),
+                        "details": {"remote_url": normalized_remote},
+                    }
+                },
+            ) from exc
+    else:
+        repo = _open_repo(name)
+        origin = None
+        if repo.remotes:
+            try:
+                origin = repo.remote("origin")
+            except ValueError:
+                origin = repo.remotes[0]
+        if origin is None:
+            if normalized_remote:
+                origin = repo.create_remote("origin", normalized_remote)
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": {
+                            "code": "remote_missing",
+                            "message": (
+                                "Local repository has no remote configured; provide a remote URL "
+                                "to continue."
+                            ),
+                            "details": {"name": name},
+                        }
+                    },
+                )
+        else:
+            if normalized_remote:
+                existing_urls = {
+                    _normalize_remote_candidate(url) for url in origin.urls
+                }
+                if normalized_remote not in existing_urls:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": {
+                                "code": "remote_mismatch",
+                                "message": (
+                                    "Local repository remote does not match the requested remote URL."
+                                ),
+                                "details": {
+                                    "requested": normalized_remote,
+                                    "existing": list(existing_urls),
+                                },
+                            }
+                        },
+                    )
+
+        try:
+            origin.fetch()
+        except GitCommandError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "fetch_failed",
+                        "message": str(exc),
+                        "details": {"remote": origin.name if origin else None},
+                    }
+                },
+            ) from exc
+
+        if repo.is_dirty(untracked_files=True):
+            message = (
+                "Local repository has uncommitted changes; fetched remote refs without "
+                "fast-forwarding."
+            )
+        else:
+            try:
+                active_branch = repo.active_branch
+            except Exception:
+                active_branch = None
+
+            if active_branch is None:
+                message = (
+                    "Repository is in a detached HEAD state; fetched remote refs without "
+                    "fast-forwarding."
+                )
+            else:
+                tracking_branch = active_branch.tracking_branch()
+                target_ref = None
+                if tracking_branch is not None:
+                    target_ref = tracking_branch.name
+                elif origin is not None:
+                    target_ref = f"{origin.name}/{active_branch.name}"
+
+                if target_ref and target_ref in {ref.name for ref in repo.refs}:
+                    try:
+                        repo.git.merge("--ff-only", target_ref)
+                        updated = True
+                        message = "Repository fast-forwarded to latest remote state."
+                    except GitCommandError as exc:
+                        raise HTTPException(
+                            status_code=409,
+                            detail={
+                                "error": {
+                                    "code": "fast_forward_failed",
+                                    "message": str(exc),
+                                    "details": {"target": target_ref},
+                                }
+                            },
+                        ) from exc
+                else:
+                    message = (
+                        "No remote tracking branch found; fetched remote refs without fast-forwarding."
+                    )
+
+    assert repo is not None
+    default_branch = _discover_default_branch(repo)
+
+    return CloneRepositoryResponse(
+        path=str(repo_path),
+        created=created,
+        updated=updated,
+        default_branch=default_branch,
+        message=message,
     )
 
 

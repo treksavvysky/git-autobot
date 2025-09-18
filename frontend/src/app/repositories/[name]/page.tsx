@@ -106,7 +106,8 @@ export default function RepositoryDashboardPage() {
 
   const doClone = async () => {
     if (!name) return;
-    await apiClient.cloneRepository(name);
+    const remoteUrl = overview?.html_url ?? undefined;
+    await apiClient.cloneRepository(name, remoteUrl);
     await loadAll();
   };
 

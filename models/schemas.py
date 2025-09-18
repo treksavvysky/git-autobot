@@ -91,9 +91,40 @@ class LocalRepositoryDetail(LocalRepository):
     last_commit: Optional[CommitMetadata] = None
 
 
+class LocalRemote(BaseModel):
+    name: str
+    urls: List[str]
+
+
+class LocalBranchStatus(BaseModel):
+    name: str
+    is_active: bool = False
+    tracking: Optional[str] = None
+    ahead: int = 0
+    behind: int = 0
+
+
 class CloneRepositoryRequest(BaseModel):
     remote_url: Optional[str] = Field(
         default=None, description="Remote URL to clone from when available"
+    )
+
+
+class CloneRepositoryResponse(BaseModel):
+    path: str = Field(description="Absolute path to the local working copy")
+    created: bool = Field(
+        description="Whether the repository was freshly cloned in this request"
+    )
+    updated: bool = Field(
+        description="Whether the existing repository was fast-forwarded"
+    )
+    default_branch: Optional[str] = Field(
+        default=None,
+        description="Default branch tracked after cloning or updating",
+    )
+    message: Optional[str] = Field(
+        default=None,
+        description="Human-readable summary of the performed action",
     )
 
 

@@ -8,6 +8,7 @@ from models import (
     CheckoutRequestBody,
     CherryPickRequestBody,
     CloneRepositoryRequest,
+    CloneRepositoryResponse,
     CommitRequestBody,
     GitCommandResult,
     GitDiffSummary,
@@ -15,6 +16,8 @@ from models import (
     GitLogResponse,
     GitStatus,
     GitStatusFile,
+    LocalBranchStatus,
+    LocalRemote,
     LocalRepository,
     LocalRepositoryDetail,
     PullRequestBody,
@@ -44,11 +47,31 @@ def local_repository(name: str) -> LocalRepositoryDetail:
 
 @router.post(
     "/{name}/clone",
-    response_model=StubResponse,
-    summary="Clone repository locally (stub)",
+    response_model=CloneRepositoryResponse,
+    summary="Clone or update the local repository",
 )
-def clone_repository(name: str, payload: CloneRepositoryRequest) -> StubResponse:
+def clone_repository(
+    name: str, payload: CloneRepositoryRequest
+) -> CloneRepositoryResponse:
     return git_service.clone_repository(name, payload)
+
+
+@router.get(
+    "/{name}/remotes",
+    response_model=List[LocalRemote],
+    summary="List configured git remotes",
+)
+def local_remotes(name: str) -> List[LocalRemote]:
+    return git_service.list_local_remotes(name)
+
+
+@router.get(
+    "/{name}/branches/local",
+    response_model=List[LocalBranchStatus],
+    summary="List local branches with tracking information",
+)
+def local_branches(name: str) -> List[LocalBranchStatus]:
+    return git_service.list_local_branches(name)
 
 
 @router.get(

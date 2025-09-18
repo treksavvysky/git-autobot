@@ -1,6 +1,76 @@
 # Git Autobot
 
-A powerful developer CLI tool to streamline git workflows and repository management.
+A powerful developer CLI tool and companion web dashboard to streamline git workflows and repository management.
+
+## Dashboard & API Quickstart
+
+The FastAPI backend powers a cockpit-style dashboard (Next.js frontend) for managing GitHub repositories alongside local clones.
+
+### Prerequisites
+
+- Docker and Docker Compose installed locally
+- Git available on the host and inside containers
+- A GitHub personal access token with repository read access
+
+### Configure Environment
+
+1. Copy `.env.example` to `.env` and add your GitHub token:
+
+   ```env
+   GITHUB_TOKEN=ghp_your_token_here
+   # Optional when not passing on the command line
+   REPO_PATH=/absolute/path/for/local/clones
+   ```
+
+2. Choose where local clones should live (absolute path only). You can either set `REPO_PATH` in `.env` or pass it to the helper script:
+
+   ```bash
+   ./docker-run.sh --repo-path /home/me/repos dev
+   ```
+
+   The script falls back to `.env` and finally defaults to `<repo>/local_repos`.
+
+### Run the Stack
+
+```bash
+# Development mode with hot reload
+./docker-run.sh --repo-path /absolute/clone/location dev
+
+# Production style run
+./docker-run.sh prod
+```
+
+The backend is available at http://localhost:8000 and the frontend at http://localhost:3000.
+
+### Clone from the Dashboard
+
+1. Open the repositories dashboard (http://localhost:3000/repositories).
+2. Select a repository and click **Clone Repository**.
+3. The backend uses GitPython to clone into `$REPO_PATH/<repo-name>` or fast-forward an existing clean checkout.
+
+### Verify Locally
+
+On the host machine:
+
+```bash
+cd "$REPO_PATH/<repo-name>"
+git status
+```
+
+You should see a valid working tree managed by the dashboard.
+
+### Troubleshooting
+
+- **Permissions**: ensure your host user owns the `REPO_PATH` directory so Docker can mount it.
+- **Wrong remote URL**: pass the desired remote to the clone action or adjust `origin` manually; mismatches are rejected for safety.
+- **Dirty working tree**: the backend fetches but will not fast-forward when local changes are detected. Commit/stash first.
+- **Token issues**: verify `GITHUB_TOKEN` in `.env` and restart the stack after updating credentials.
+
+### API Highlights
+
+- `POST /local/repos/{name}/clone` — clone new repos or fast-forward a clean checkout.
+- `GET /local/repos/{name}/remotes` — inspect configured git remotes for a local clone.
+- `GET /local/repos/{name}/branches/local` — review local branches with ahead/behind status.
 
 ## Features
 

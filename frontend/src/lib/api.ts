@@ -197,6 +197,20 @@ class ApiClient {
     return handleResponse<any>(resp);
   }
 
+  async getLocalRemotes(name: string): Promise<any[]> {
+    const url = `${API_BASE_URL}/local/repos/${encodeURIComponent(name)}/remotes`;
+    const resp = await fetch(url, { cache: "no-store" });
+    return handleResponse<any[]>(resp);
+  }
+
+  async getLocalBranchStatus(name: string): Promise<any[]> {
+    const url = `${API_BASE_URL}/local/repos/${encodeURIComponent(
+      name
+    )}/branches/local`;
+    const resp = await fetch(url, { cache: "no-store" });
+    return handleResponse<any[]>(resp);
+  }
+
   async cloneRepository(name: string, remote_url?: string): Promise<any> {
     const url = `${API_BASE_URL}/local/repos/${encodeURIComponent(name)}/clone`;
     const resp = await fetch(url, {
