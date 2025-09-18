@@ -62,10 +62,10 @@ def local_status(name: str) -> GitStatus:
 
 @router.post(
     "/{name}/pull",
-    response_model=StubResponse,
-    summary="Pull latest changes (stub)",
+    response_model=GitCommandResult,
+    summary="Pull latest changes",
 )
-def local_pull(name: str, payload: PullRequestBody) -> StubResponse:
+def local_pull(name: str, payload: PullRequestBody) -> GitCommandResult:
     return git_service.pull_repository(name, payload.rebase)
 
 

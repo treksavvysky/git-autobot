@@ -160,10 +160,82 @@ def get_status(name: str) -> GitStatus:
     return GitStatus(branch=branch, files=files)
 
 
-def pull_repository(name: str, rebase: bool) -> StubResponse:
-    return StubResponse(
-        note="Pull operation is stubbed. Configure remotes and implement later.",
-        details={"rebase": rebase},
+def pull_repository(name: str, rebase: bool) -> GitCommandResult:
+    repo = _open_repo(name)
+
+    try:
+        active_branch = repo.active_branch
+    except TypeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "detached_head",
+                    "message": "Cannot pull while HEAD is detached.",
+                    "details": {},
+                }
+            },
+        ) from exc
+
+    tracking_branch = active_branch.tracking_branch()
+
+    pull_args: List[str] = []
+    if rebase:
+        pull_args.append("--rebase")
+
+    remote_name: Optional[str] = None
+    remote_ref: Optional[str] = None
+
+    if tracking_branch is not None:
+        tracking_name = tracking_branch.name
+        if "/" in tracking_name:
+            remote_name, remote_ref = tracking_name.split("/", 1)
+        else:
+            remote_name = tracking_name
+    elif repo.remotes:
+        remote = next((r for r in repo.remotes if r.name == "origin"), repo.remotes[0])
+        remote_name = remote.name
+        remote_ref = active_branch.name
+        pull_args.extend([remote_name, remote_ref])
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "no_remote",
+                    "message": "Repository has no remotes configured for pulling.",
+                    "details": {"branch": active_branch.name},
+                }
+            },
+        )
+
+    try:
+        output = repo.git.pull(*pull_args)
+    except GitCommandError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "pull_failed",
+                    "message": str(exc),
+                    "details": {
+                        "branch": active_branch.name,
+                        "remote": remote_name,
+                        "rebase": rebase,
+                    },
+                }
+            },
+        ) from exc
+
+    return GitCommandResult(
+        ok=True,
+        message="Pull completed successfully.",
+        details={
+            "branch": active_branch.name,
+            "remote": remote_name,
+            "rebase": rebase,
+            "output": output.strip(),
+        },
     )
 
 

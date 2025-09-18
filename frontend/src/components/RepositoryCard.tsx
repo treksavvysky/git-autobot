@@ -7,12 +7,17 @@ interface RepositoryCardProps {
   token?: string;
 }
 
-export default function RepositoryCard({ repository, token }: RepositoryCardProps) {
+export default function RepositoryCard({
+  repository,
+  token,
+}: RepositoryCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
-  
-  const readmeHref = token
-    ? `/repositories/${encodeURIComponent(repository.name)}/readme?token=${encodeURIComponent(token)}`
-    : `/repositories/${encodeURIComponent(repository.name)}/readme`;
+
+  const dashboardHref = token
+    ? `/repositories/${encodeURIComponent(
+        repository.name
+      )}?token=${encodeURIComponent(token)}`
+    : `/repositories/${encodeURIComponent(repository.name)}`;
 
   const formatLastUpdated = (dateString?: string) => {
     if (!dateString) return "Unknown";
@@ -23,25 +28,38 @@ export default function RepositoryCard({ repository, token }: RepositoryCardProp
     // Trigger the card enter animation
     const timer = setTimeout(() => {
       if (cardRef.current) {
-        cardRef.current.classList.add('card-enter-active');
+        cardRef.current.classList.add("card-enter-active");
       }
     }, 100);
-    
+
     return () => clearTimeout(timer);
   }, []);
 
+  const handleClick = () => {
+    if (typeof window !== "undefined") {
+      window.location.href = dashboardHref;
+    }
+  };
+
   return (
-    <div ref={cardRef} className="flex flex-col bg-gray-800/50 border border-gray-700 rounded-lg p-6 shadow-lg hover:shadow-blue-500/20 hover:border-blue-500/50 transition-all duration-200 card-enter">
+    <div
+      ref={cardRef}
+      onClick={handleClick}
+      className="flex flex-col bg-gray-800/50 border border-gray-700 rounded-lg p-6 shadow-lg transition-all duration-200 card-enter cursor-pointer"
+    >
       {/* Card Body */}
       <div className="flex-grow">
         {/* Header */}
         <div className="flex justify-between items-start mb-4">
           <h3 className="text-lg font-semibold text-white">
             <a
-              href={repository.html_url || `https://github.com/${repository.name}`}
+              href={
+                repository.html_url || `https://github.com/${repository.name}`
+              }
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-blue-400 transition-colors duration-200"
+              onClick={(e) => e.stopPropagation()}
             >
               {repository.name}
             </a>

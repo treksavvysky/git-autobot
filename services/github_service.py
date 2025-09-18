@@ -165,12 +165,14 @@ def get_repository_commits(client: Github, name: str, limit: int = 50) -> List[C
         repo = client.get_user().get_repo(name)
         commits: List[CommitMetadata] = []
         for commit in repo.get_commits()[:limit]:
+            date_obj = getattr(commit.commit.author, "date", None)
+            date_str = date_obj.isoformat() if date_obj else None
             commits.append(
                 CommitMetadata(
                     sha=commit.sha,
                     message=commit.commit.message,
                     author=getattr(commit.commit.author, "name", None),
-                    date=getattr(commit.commit.author, "date", None),
+                    date=date_str,
                 )
             )
         return commits
@@ -273,11 +275,15 @@ def get_repository_issues(
 ) -> List[IssueModel]:
     try:
         repo = client.get_user().get_repo(name)
-        issues: Iterable = repo.get_issues(
-            state=state,
-            assignee=assignee,
-            labels=labels.split(",") if labels else None,
-        )
+        
+        # Build parameters conditionally to avoid passing None values
+        params = {"state": state}
+        if assignee is not None:
+            params["assignee"] = assignee
+        if labels is not None:
+            params["labels"] = labels.split(",")
+            
+        issues: Iterable = repo.get_issues(**params)
         results: List[IssueModel] = []
         for issue in issues:
             if issue.pull_request is not None:

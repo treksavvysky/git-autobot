@@ -3,6 +3,11 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# Install system dependencies needed by GitPython
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir uv
 
 COPY requirements.txt .
