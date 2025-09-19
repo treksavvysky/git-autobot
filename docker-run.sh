@@ -45,8 +45,8 @@ resolve_repo_path() {
             env_line=$(grep -E '^REPO_PATH=' .env | tail -n1)
             if [ -n "$env_line" ]; then
                 chosen_path=${env_line#REPO_PATH=}
-                chosen_path=${chosen_path%"}
-                chosen_path=${chosen_path#"}
+                chosen_path=${chosen_path%\"}
+                chosen_path=${chosen_path#\"}
             fi
         fi
         if [ -z "$chosen_path" ]; then

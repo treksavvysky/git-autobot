@@ -9,12 +9,12 @@ services:
       - "8000:8000"
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - REPO_PATH=${REPO_PATH}
+      - LOCAL_REPOS_DIR=/app/local_repos
     env_file:
       - .env
     volumes:
       - .:/app
-      - ${REPO_PATH}:${REPO_PATH}
+      - ${HOST_REPO_PATH}:/app/local_repos
     command:
       [
         "uv",
