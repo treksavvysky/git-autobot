@@ -1,0 +1,509 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import ErrorMessage from "@/components/ErrorMessage";
+import { apiClient } from "@/lib/api";
+
+type RepositoryOverview = {
+  name?: string;
+  description?: string;
+  html_url?: string;
+  default_branch?: string;
+  last_commit?: { message?: string };
+};
+
+type SyncStatus = {
+  ahead?: number;
+  behind?: number;
+};
+
+type BranchSummary = {
+  name: string;
+};
+
+type CommitSummary = {
+  sha: string;
+  message: string;
+  author?: string;
+  date?: string | null;
+};
+
+type IssueSummary = {
+  id: string | number;
+  title: string;
+  state: string;
+};
+
+type RecurringTask = {
+  id: string;
+  name: string;
+  enabled: boolean;
+};
+
+type CiRunSummary = {
+  name?: string;
+};
+
+type HealthSummary = {
+  status?: string;
+};
+
+type Note = {
+  id: string | number;
+  content: string;
+};
+
+type Snippet = {
+  id: string | number;
+  title: string;
+  content: string;
+};
+
+type LocalRepository = {
+  active_branch?: string;
+  last_commit?: { message?: string };
+};
+
+type RepositoryDashboardClientProps = {
+  name: string;
+  overview: RepositoryOverview | null;
+  syncStatus: SyncStatus | null;
+  localRepo: LocalRepository | null;
+  branches: BranchSummary[];
+  commits: CommitSummary[];
+  issues: IssueSummary[];
+  recurringTasks: RecurringTask[];
+  ciLatest: CiRunSummary | null;
+  health: HealthSummary | null;
+  notes: Note[];
+  snippets: Snippet[];
+};
+
+export default function RepositoryDashboardClient({
+  name,
+  overview,
+  syncStatus,
+  localRepo,
+  branches,
+  commits,
+  issues,
+  recurringTasks,
+  ciLatest,
+  health,
+  notes,
+  snippets,
+}: RepositoryDashboardClientProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [isMutating, setIsMutating] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [snippetTitle, setSnippetTitle] = useState("");
+  const [snippetContent, setSnippetContent] = useState("");
+  const isBusy = isPending || isMutating;
+
+  const localState = useMemo(() => {
+    if (!localRepo) return { state: "not_found" } as const;
+    const ahead = syncStatus?.ahead ?? 0;
+    const behind = syncStatus?.behind ?? 0;
+    if (ahead === 0 && behind === 0) return { state: "synced" } as const;
+    return { state: "out_of_sync", ahead, behind } as const;
+  }, [localRepo, syncStatus]);
+
+  const refresh = () => {
+    startTransition(() => {
+      router.refresh();
+    });
+  };
+
+  const runAction = async (action: () => Promise<unknown>) => {
+    setActionError(null);
+    setIsMutating(true);
+    try {
+      await action();
+      refresh();
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to complete the request"
+      );
+    }
+    setIsMutating(false);
+  };
+
+  const doClone = async () => {
+    await runAction(() =>
+      apiClient.cloneRepository(name, overview?.html_url ?? undefined)
+    );
+  };
+
+  const doPull = async (rebase: boolean) => {
+    await runAction(() => apiClient.pullRepository(name, { rebase }));
+  };
+
+  const doPush = async () => {
+    await runAction(() => apiClient.pushRepository(name, {}));
+  };
+
+  const toggleTask = async (taskId: string) => {
+    await runAction(() => apiClient.toggleRecurringTask(name, taskId));
+  };
+
+  const addNote = async () => {
+    const content = noteDraft.trim();
+    if (!content) return;
+    await runAction(async () => {
+      await apiClient.createNote(name, { content });
+      setNoteDraft("");
+    });
+  };
+
+  const addSnippet = async () => {
+    const title = snippetTitle.trim();
+    const content = snippetContent.trim();
+    if (!title || !content) return;
+    await runAction(async () => {
+      await apiClient.createSnippet(name, { title, content });
+      setSnippetTitle("");
+      setSnippetContent("");
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">{name}</h1>
+            <p className="text-gray-300">Repository dashboard</p>
+          </div>
+          <Link
+            href="/repositories"
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
+          >
+            Back to Repositories
+          </Link>
+        </div>
+
+        {actionError && (
+          <div className="mb-6">
+            <ErrorMessage
+              title="Action failed"
+              message={actionError}
+              onRetry={() => router.refresh()}
+            />
+          </div>
+        )}
+
+        <div className="space-y-6">
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-white mb-1">
+                  {overview?.name || name}
+                </h2>
+                <p className="text-gray-300">
+                  {overview?.description || "No description."}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={doPush}
+                  disabled={isBusy}
+                  className="px-3 py-2 text-sm rounded-md bg-green-600 text-white hover:bg-green-700 border border-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Push Changes
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
+                {localState.state === "not_found" && (
+                  <div className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-md p-4">
+                    <div>
+                      <p className="text-white font-medium">
+                        Local Status: Not Found
+                      </p>
+                      <p className="text-gray-400 text-sm">
+                        Clone to manage locally.
+                      </p>
+                    </div>
+                    <button
+                      onClick={doClone}
+                      disabled={isBusy}
+                      className="px-3 py-2 text-sm rounded-md bg-green-600 text-white hover:bg-green-700 border border-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Clone Repository
+                    </button>
+                  </div>
+                )}
+                {localState.state === "synced" && (
+                  <div className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-md p-4">
+                    <div>
+                      <p className="text-white font-medium">
+                        Local Status: Synced
+                      </p>
+                      <p className="text-gray-400 text-sm">
+                        Branch {" "}
+                        {localRepo?.active_branch || overview?.default_branch}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => doPull(false)}
+                        disabled={isBusy}
+                        className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Pull
+                      </button>
+                      <button
+                        onClick={() => doPull(true)}
+                        disabled={isBusy}
+                        className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Pull --rebase
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {localState.state === "out_of_sync" && (
+                  <div className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-md p-4">
+                    <div>
+                      <p className="text-white font-medium">
+                        Local Status: Out of Sync
+                      </p>
+                      <p className="text-gray-400 text-sm">
+                        Ahead {localState.ahead} • Behind {localState.behind}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => doPull(false)}
+                        disabled={isBusy}
+                        className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Pull
+                      </button>
+                      <button
+                        onClick={() => doPull(true)}
+                        disabled={isBusy}
+                        className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Pull --rebase
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="bg-gray-800 border border-gray-700 rounded-md p-4">
+                <p className="text-white font-medium mb-2">Last Commit</p>
+                <p className="text-gray-300 text-sm">
+                  {overview?.last_commit?.message ||
+                    localRepo?.last_commit?.message ||
+                    "—"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 lg:col-span-1">
+              <p className="text-white font-semibold mb-3">Git Commands Helper</p>
+              <div className="bg-gray-900 border border-gray-700 rounded-md p-3 mb-3">
+                <p className="text-gray-300 text-sm">
+                  Suggested: git pull --rebase
+                </p>
+              </div>
+              <details className="bg-gray-900 border border-gray-700 rounded-md p-3">
+                <summary className="text-white cursor-pointer">
+                  Common Commands
+                </summary>
+                <div className="mt-3 space-y-2">
+                  <code className="block text-sm text-gray-300">git pull --rebase</code>
+                  <code className="block text-sm text-gray-300">git push</code>
+                  <code className="block text-sm text-gray-300">git stash</code>
+                </div>
+              </details>
+            </div>
+
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 lg:col-span-1">
+              <p className="text-white font-semibold mb-3">PRs & Issues</p>
+              <div className="space-y-2">
+                {issues.slice(0, 5).map((it) => (
+                  <div key={it.id} className="flex items-center justify-between">
+                    <span className="text-gray-200 text-sm truncate">
+                      {it.title}
+                    </span>
+                    <span className="text-xs text-yellow-400">{it.state}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4">
+                <p className="text-white font-semibold mb-2">Recurring</p>
+                <div className="space-y-2">
+                  {recurringTasks.map((t) => (
+                    <label
+                      key={t.id}
+                      className="flex items-center gap-2 text-sm text-gray-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={t.enabled}
+                        onChange={() => toggleTask(t.id)}
+                        disabled={isBusy}
+                        className="accent-blue-600"
+                      />
+                      {t.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 lg:col-span-1">
+              <p className="text-white font-semibold mb-3">Recent Commits</p>
+              <div className="max-h-56 overflow-y-auto space-y-2">
+                {commits.slice(0, 10).map((c) => (
+                  <div key={c.sha} className="text-sm">
+                    <p className="text-gray-200 truncate">{c.message}</p>
+                    <p className="text-gray-400">
+                      {c.author} • {new Date(c.date || "").toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex gap-2">
+                <button className="px-3 py-2 text-sm rounded-md bg-gray-700 text-white border border-gray-600">
+                  Quick-diff vs main
+                </button>
+                <button className="px-3 py-2 text-sm rounded-md bg-gray-700 text-white border border-gray-600">
+                  View Staged
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 lg:col-span-1 xl:col-span-1">
+              <p className="text-white font-semibold mb-3">Branches</p>
+              <div className="text-gray-300 text-sm mb-4">
+                {branches.map((branch) => branch.name).join(", ")}
+              </div>
+              <div className="h-24 bg-gray-900 border border-gray-700 rounded-md" />
+              <div className="mt-4 flex gap-2">
+                <button className="px-3 py-2 text-sm rounded-md bg-gray-700 text-white border border-gray-600">
+                  New Branch from main
+                </button>
+                <button className="px-3 py-2 text-sm rounded-md bg-gray-700 text-white border border-gray-600">
+                  Delete Stale Branches
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 lg:col-span-1 xl:col-span-1">
+              <p className="text-white font-semibold mb-3">CI/CD & Health</p>
+              <div className="text-sm space-y-1">
+                <p className="text-gray-300">
+                  Latest Action: <span className="text-gray-200">{ciLatest?.name || "—"}</span>
+                </p>
+                <p className="text-gray-300">
+                  Health: <span className="text-gray-200">{health?.status || "—"}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 lg:col-span-2 xl:col-span-2">
+              <p className="text-white font-semibold mb-3">Captain&apos;s Log</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <textarea
+                    placeholder="New note..."
+                    className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-gray-200 mb-2"
+                    rows={4}
+                    value={noteDraft}
+                    onChange={(event) => setNoteDraft(event.target.value)}
+                    onKeyDown={async (e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        await addNote();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={addNote}
+                    disabled={isBusy}
+                    className="mb-2 px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Save Note
+                  </button>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {notes.map((note) => (
+                      <div
+                        key={note.id}
+                        className="bg-gray-900 border border-gray-700 rounded-md p-2 text-sm text-gray-200"
+                      >
+                        {note.content}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Snippet title"
+                    className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-gray-200 mb-2"
+                    value={snippetTitle}
+                    onChange={(event) => setSnippetTitle(event.target.value)}
+                  />
+                  <textarea
+                    placeholder="Snippet content..."
+                    className="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-gray-200 mb-2"
+                    rows={4}
+                    value={snippetContent}
+                    onChange={(event) => setSnippetContent(event.target.value)}
+                  />
+                  <button
+                    className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={addSnippet}
+                    disabled={isBusy}
+                  >
+                    Save Snippet
+                  </button>
+                  <div className="space-y-2 mt-3 max-h-32 overflow-y-auto">
+                    {snippets.map((snippet) => (
+                      <div
+                        key={snippet.id}
+                        className="bg-gray-900 border border-gray-700 rounded-md p-2 text-sm text-gray-200"
+                      >
+                        <p className="font-medium">{snippet.title}</p>
+                        <pre className="whitespace-pre-wrap text-gray-300 text-xs">
+                            {snippet.content}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 border-2 border-blue-700 rounded-lg shadow-md p-6 lg:col-span-2 xl:col-span-2">
+              <p className="text-white font-semibold mb-3">AI Assistant</p>
+              <div className="flex gap-2 mb-3">
+                <button className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700">
+                  Explain recent error
+                </button>
+                <button className="px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-700">
+                  Suggest next step
+                </button>
+              </div>
+              <div className="bg-gray-900 border border-gray-700 rounded-md p-3">
+                <p className="text-gray-300 text-sm">Daily Brief will appear here.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
