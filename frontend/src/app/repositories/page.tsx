@@ -1,44 +1,24 @@
-"use client";
-
-import { useState, useEffect } from "react";
 import { Repository } from "@/types/repository";
 import { apiClient } from "@/lib/api";
 import RepositoryCard from "@/components/RepositoryCard";
-import LoadingSpinner from "@/components/LoadingSpinner";
 import ErrorMessage from "@/components/ErrorMessage";
+import TokenForm from "@/components/TokenForm";
 
-export default function RepositoriesPage() {
-  const [repositories, setRepositories] = useState<Repository[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [githubToken, setGithubToken] = useState("");
-  const [activeToken, setActiveToken] = useState<string | undefined>(undefined);
+export default async function RepositoriesPage({
+  searchParams,
+}: {
+  searchParams: { [key: string]: string | string[] | undefined };
+}) {
+  const token = typeof searchParams.token === 'string' ? searchParams.token : undefined;
 
-  const fetchRepositories = async (token?: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const repos = await apiClient.getRepositories(token);
-      setRepositories(repos);
-      setActiveToken(token);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to fetch repositories"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  let repositories: Repository[] = [];
+  let error: string | null = null;
 
-  useEffect(() => {
-    fetchRepositories();
-  }, []);
-
-  const handleTokenSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedToken = githubToken.trim();
-    fetchRepositories(trimmedToken ? trimmedToken : undefined);
-  };
+  try {
+    repositories = await apiClient.getRepositories(token);
+  } catch (err) {
+    error = err instanceof Error ? err.message : "Failed to fetch repositories";
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 py-8">
@@ -52,55 +32,13 @@ export default function RepositoriesPage() {
           </p>
         </div>
 
-        {/* GitHub Token Input */}
-        <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-lg font-semibold text-white mb-4">
-            GitHub Authentication
-          </h2>
-          <form onSubmit={handleTokenSubmit} className="flex gap-4">
-            <div className="flex-1">
-              <label
-                htmlFor="github-token"
-                className="block text-sm font-medium text-gray-300 mb-2"
-              >
-                GitHub Personal Access Token
-              </label>
-              <input
-                type="password"
-                id="github-token"
-                value={githubToken}
-                onChange={(e) => setGithubToken(e.target.value)}
-                placeholder="Enter your GitHub token (optional)"
-                className="w-full px-3 py-2 border border-gray-600 bg-gray-700 text-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 placeholder-gray-400"
-              />
-              <p className="mt-1 text-sm text-gray-400">
-                Leave empty to use environment variable or provide your token
-                for authentication
-              </p>
-            </div>
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={loading}
-                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-              >
-                {loading ? "Loading..." : "Load Repositories"}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* Content */}
-        {loading && <LoadingSpinner />}
+        <TokenForm currentToken={token} />
 
         {error && (
-          <ErrorMessage
-            message={error}
-            onRetry={() => fetchRepositories(activeToken)}
-          />
+          <ErrorMessage message={error} />
         )}
 
-        {!loading && !error && repositories.length === 0 && (
+        {!error && repositories.length === 0 && (
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg shadow-md p-12 text-center">
             <svg
               className="w-16 h-16 text-gray-400 mx-auto mb-4"
@@ -125,7 +63,7 @@ export default function RepositoriesPage() {
           </div>
         )}
 
-        {!loading && !error && repositories.length > 0 && (
+        {!error && repositories.length > 0 && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold text-white">
@@ -137,7 +75,7 @@ export default function RepositoriesPage() {
                 <RepositoryCard
                   key={repo.full_name || repo.name || `repo-${index}`}
                   repository={repo}
-                  token={activeToken}
+                  token={token}
                 />
               ))}
             </div>
