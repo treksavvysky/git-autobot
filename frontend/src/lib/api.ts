@@ -1,4 +1,5 @@
-import { ApiError, Repository, ReadmeResponse } from "@/types/repository";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { Repository, ReadmeResponse } from "@/types/repository";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
