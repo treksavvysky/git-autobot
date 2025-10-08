@@ -14,21 +14,25 @@ The FastAPI backend powers a cockpit-style dashboard (Next.js frontend) for mana
 
 ### Configure Environment
 
-1. Copy `.env.example` to `.env` and add your GitHub token:
+1. Copy `.env.example` to `.env` and configure your environment variables:
 
    ```env
    GITHUB_TOKEN=ghp_your_token_here
-   # Optional when not passing on the command line
-   REPO_PATH=/absolute/path/for/local/clones
+   LOCAL_REPOS_DIR=/absolute/path/for/local/clones
+   API_KEY=your_secure_api_key_here
+   API_SERVER_URL=http://localhost:8000
+   ALLOWED_ORIGINS=http://localhost:3000
    ```
 
-2. Choose where local clones should live (absolute path only). You can either set `REPO_PATH` in `.env` or pass it to the helper script:
+2. Choose where local clones should live (absolute path only). You can either set `LOCAL_REPOS_DIR` in `.env` or pass it to the helper script:
 
    ```bash
    ./docker-run.sh --repo-path /home/me/repos dev
    ```
 
    The script falls back to `.env` and finally defaults to `<repo>/local_repos`.
+
+   **Note**: The `API_KEY` is required for all API endpoints and should be a secure, randomly generated string.
 
 ### Run the Stack
 
@@ -427,6 +431,8 @@ cp .env.example .env
 For detailed Docker setup instructions, see [DOCKER.md](DOCKER.md).
 
 ### API Endpoints
+
+All API endpoints require authentication via the `X-API-Key` header with your configured `API_KEY`.
 
 - `GET /repos` - List user repositories
   - Query parameter: `token` (optional GitHub Personal Access Token)

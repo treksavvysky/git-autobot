@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Response
 
 from models import MetaConfig
+from services.auth import verify_api_key
 from services.config import get_settings
 
 router = APIRouter(tags=["Meta"])
@@ -20,7 +21,7 @@ def options_handler(full_path: str) -> Response:
     )
 
 
-@router.get("/meta/config", response_model=MetaConfig, summary="Backend metadata")
+@router.get("/meta/config", response_model=MetaConfig, summary="Backend metadata", dependencies=[Depends(verify_api_key)])
 def meta_config() -> MetaConfig:
     settings = get_settings()
     return MetaConfig(

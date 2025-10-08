@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 from fastapi_app import app
 import fastapi_app
+import os
 
 
 def test_list_repositories_returns_repo_list():
@@ -16,10 +17,11 @@ def test_list_repositories_returns_repo_list():
     mock_user = MagicMock()
     mock_user.get_repos.return_value = [mock_repo]
 
-    with patch("fastapi_app.Github") as MockGithub:
+    with patch("fastapi_app.Github") as MockGithub, \
+         patch("services.auth.os.getenv", return_value="test_api_key"):
         instance = MockGithub.return_value
         instance.get_user.return_value = mock_user
-        response = client.get("/repos", params={"token": "fake"})
+        response = client.get("/repos", params={"token": "fake"}, headers={"X-API-Key": "test_api_key"})
 
     assert response.status_code == 200
     assert response.json() == [
@@ -64,10 +66,11 @@ def test_get_repository_details():
     mock_user = MagicMock()
     mock_user.get_repo.return_value = mock_repo
 
-    with patch("fastapi_app.Github") as MockGithub:
+    with patch("fastapi_app.Github") as MockGithub, \
+         patch("services.auth.os.getenv", return_value="test_api_key"):
         instance = MockGithub.return_value
         instance.get_user.return_value = mock_user
-        response = client.get("/repos/repo1", params={"token": "fake"})
+        response = client.get("/repos/repo1", params={"token": "fake"}, headers={"X-API-Key": "test_api_key"})
 
     assert response.status_code == 200
     assert response.json() == {
@@ -99,10 +102,11 @@ def test_get_repository_readme():
     mock_user = MagicMock()
     mock_user.get_repo.return_value = mock_repo
 
-    with patch("fastapi_app.Github") as MockGithub:
+    with patch("fastapi_app.Github") as MockGithub, \
+         patch("services.auth.os.getenv", return_value="test_api_key"):
         instance = MockGithub.return_value
         instance.get_user.return_value = mock_user
-        response = client.get("/repos/repo1/readme", params={"token": "fake"})
+        response = client.get("/repos/repo1/readme", params={"token": "fake"}, headers={"X-API-Key": "test_api_key"})
 
     assert response.status_code == 200
     assert response.json() == {"content": "# Title"}
@@ -118,7 +122,8 @@ def test_list_local_repositories(tmp_path):
     original_path = fastapi_app.LOCAL_REPOS_DIR
     fastapi_app.LOCAL_REPOS_DIR = tmp_path
 
-    response = client.get("/local/repos")
+    with patch("services.auth.os.getenv", return_value="test_api_key"):
+        response = client.get("/local/repos", headers={"X-API-Key": "test_api_key"})
 
     assert response.status_code == 200
     assert response.json() == [
