@@ -29,7 +29,7 @@ def get_settings() -> Settings:
         local_repos_dir = (base_dir / "local_repos").resolve()
     local_repos_dir.mkdir(parents=True, exist_ok=True)
 
-    allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+    allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
     if allowed_origins_env.strip() == "*":
         allowed_origins = ["*"]
     else:
@@ -39,7 +39,10 @@ def get_settings() -> Settings:
             if origin.strip()
         ]
         if not allowed_origins:
-            allowed_origins = ["http://localhost:3000"]
+            allowed_origins = [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000"
+            ]
 
     return Settings(
         github_token=os.getenv("GITHUB_TOKEN"),

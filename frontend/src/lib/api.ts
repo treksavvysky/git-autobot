@@ -1,8 +1,9 @@
-import { ApiError, Repository, ReadmeResponse } from "@/types/repository";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { Repository, ReadmeResponse } from "@/types/repository";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ||
-  "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
+  
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -35,7 +36,8 @@ class ApiClient {
     if (token) {
       url.searchParams.set("token", token);
     }
-
+    // Add this line for debugging!
+    console.log("Attempting to fetch from URL:", url.toString());
     const response = await fetch(url.toString(), {
       cache: "no-store",
     });

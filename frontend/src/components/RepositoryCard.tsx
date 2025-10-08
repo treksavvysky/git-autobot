@@ -1,4 +1,4 @@
-import Link from "next/link";
+"use client";
 import { Repository } from "@/types/repository";
 import { useEffect, useRef } from "react";
 

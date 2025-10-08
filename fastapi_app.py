@@ -39,7 +39,6 @@ app.add_middleware(
 async def request_logger(request: Request, call_next: Callable[[Request], Response]) -> Response:
     logger.info("%s %s", request.method, request.url.path)
     response = await call_next(request)
-    response.headers.setdefault("Access-Control-Allow-Origin", settings.allowed_origins[0] if settings.allowed_origins else "*")
     return response
 
 
