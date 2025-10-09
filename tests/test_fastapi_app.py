@@ -18,7 +18,7 @@ def test_list_repositories_returns_repo_list():
     mock_user.get_repos.return_value = [mock_repo]
 
     with patch("fastapi_app.Github") as MockGithub, \
-         patch("services.auth.os.getenv", return_value="test_api_key"):
+         patch("services.auth.API_KEY", "test_api_key"):
         instance = MockGithub.return_value
         instance.get_user.return_value = mock_user
         response = client.get("/repos", params={"token": "fake"}, headers={"X-API-Key": "test_api_key"})
@@ -67,7 +67,7 @@ def test_get_repository_details():
     mock_user.get_repo.return_value = mock_repo
 
     with patch("fastapi_app.Github") as MockGithub, \
-         patch("services.auth.os.getenv", return_value="test_api_key"):
+         patch("services.auth.API_KEY", "test_api_key"):
         instance = MockGithub.return_value
         instance.get_user.return_value = mock_user
         response = client.get("/repos/repo1", params={"token": "fake"}, headers={"X-API-Key": "test_api_key"})
@@ -103,7 +103,7 @@ def test_get_repository_readme():
     mock_user.get_repo.return_value = mock_repo
 
     with patch("fastapi_app.Github") as MockGithub, \
-         patch("services.auth.os.getenv", return_value="test_api_key"):
+         patch("services.auth.API_KEY", "test_api_key"):
         instance = MockGithub.return_value
         instance.get_user.return_value = mock_user
         response = client.get("/repos/repo1/readme", params={"token": "fake"}, headers={"X-API-Key": "test_api_key"})
@@ -118,18 +118,12 @@ def test_list_local_repositories(tmp_path):
     repo_dir = tmp_path / "repo1"
     (repo_dir / ".git").mkdir(parents=True)
 
-    # Patch LOCAL_REPOS_DIR to our temporary path
-    original_path = fastapi_app.LOCAL_REPOS_DIR
-    fastapi_app.LOCAL_REPOS_DIR = tmp_path
-
-    with patch("services.auth.os.getenv", return_value="test_api_key"):
+    with patch("services.git_service._local_root", return_value=tmp_path), \
+         patch("services.auth.API_KEY", "test_api_key"):
         response = client.get("/local/repos", headers={"X-API-Key": "test_api_key"})
 
     assert response.status_code == 200
     assert response.json() == [
         {"name": "repo1", "path": str(repo_dir)}
     ]
-
-    # restore
-    fastapi_app.LOCAL_REPOS_DIR = original_path
 

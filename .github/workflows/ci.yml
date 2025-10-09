@@ -1,0 +1,26 @@
+name: CI Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Build Docker image with metadata
+      run: |
+        export APP_VERSION=${GITHUB_REF_NAME}
+        export GIT_SHA=${GITHUB_SHA}
+        export BUILD_TIME=$(date -u +%FT%TZ)
+
+        docker build . \
+          --build-arg APP_VERSION=${APP_VERSION} \
+          --build-arg GIT_SHA=${GIT_SHA} \
+          --build-arg BUILD_TIME=${BUILD_TIME} \
+          -t git-autobot:latest

@@ -1,6 +1,16 @@
 # Simple Dockerfile for running FastAPI app
 FROM python:3.13-slim
 
+# Add build arguments for metadata
+ARG APP_VERSION
+ARG GIT_SHA
+ARG BUILD_TIME
+
+# Expose build arguments as environment variables
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+
 WORKDIR /app
 
 # Install system dependencies needed by GitPython

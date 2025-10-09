@@ -7,8 +7,8 @@ You are setting up and extending the FastAPI backend to fully support the cockpi
 ## Repository Map
 
 - `fastapi_app.py` — app entry and route wiring.
-- `services/` — Git, GitHub, CI, tasks, notes/snippets, and auth service layers.
-- `models/` — pydantic schemas (request/response) and domain models.
+- `services/` — Git, GitHub, CI, tasks, notes/snippets, auth, and health service layers.
+- `models/` — pydantic schemas (request/response), domain models, and status models.
 - `routes/` — route modules grouped by feature (repos, local, ci, ai, notes, etc.).
 - `tests/` — pytest suites for units + lightweight integration.
 
@@ -92,12 +92,54 @@ Reproduce exactly as listed in TASK.md:
 - Commits & Diffs: remote commits, diff, staged, file-at-ref.
 - Branch & PR Management: create/delete branches, graph, PRs, prune‑stale.
 - Issues & Workflow: issues, recurring tasks CRUD (list/create/toggle).
-- CI/CD & Health: actions latest/runs, coverage, docker, aggregate health.
+- CI/CD & Health: actions latest/runs, coverage, docker, aggregate health, and a public `/status` endpoint for self-diagnostics.
 - Notes & Snippets: notes get/set, snippets CRUD.
 - AI Hooks: explain-error, next-step, daily-brief.
 - Misc: OPTIONS preflight, meta/config.
 
 ## Minimal Schemas (illustrative — adjust as needed)
+
+**StatusReport:**
+
+```json
+{
+  "overall_status": "healthy|degraded|unhealthy",
+  "service": {
+    "service_name": "string",
+    "app_version": "string",
+    "git_sha": "string",
+    "build_time": "datetime",
+    "uptime": "float"
+  },
+  "env": {
+    "python_version": "string",
+    "platform": "string",
+    "container_id": "string"
+  },
+  "checks": {
+    "github_api": {
+      "status": "healthy|degraded|unhealthy",
+      "details": "object"
+    },
+    "gitpython": {
+      "status": "healthy|degraded|unhealthy",
+      "details": "object"
+    },
+    "workspace": {
+      "status": "healthy|degraded|unhealthy",
+      "details": "object"
+    },
+    "queue": {
+      "status": "healthy|degraded|unhealthy",
+      "details": "object"
+    },
+    "network": {
+      "status": "healthy|degraded|unhealthy",
+      "details": "object"
+    }
+  }
+}
+```
 
 **SyncStatus:**
 

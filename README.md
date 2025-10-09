@@ -22,6 +22,12 @@ The FastAPI backend powers a cockpit-style dashboard (Next.js frontend) for mana
    API_KEY=your_secure_api_key_here
    API_SERVER_URL=http://localhost:8000
    ALLOWED_ORIGINS=http://localhost:3000
+
+   # The following variables are injected at build time by the CI/CD pipeline
+   # and are not intended for manual configuration:
+   # APP_VERSION: The git ref name (e.g., a tag or branch name).
+   # GIT_SHA: The full git SHA of the commit.
+   # BUILD_TIME: The UTC timestamp of the build (ISO 8601 format).
    ```
 
 2. Choose where local clones should live (absolute path only). You can either set `LOCAL_REPOS_DIR` in `.env` or pass it to the helper script:
@@ -45,6 +51,11 @@ The FastAPI backend powers a cockpit-style dashboard (Next.js frontend) for mana
 ```
 
 The backend is available at http://localhost:8000 and the frontend at http://localhost:3000.
+
+You can perform a quick smoke test to verify the backend is running by checking the status endpoint:
+```bash
+curl http://localhost:8000/status | python -m json.tool
+```
 
 ### Clone from the Dashboard
 
@@ -432,7 +443,9 @@ For detailed Docker setup instructions, see [DOCKER.md](DOCKER.md).
 
 ### API Endpoints
 
-All API endpoints require authentication via the `X-API-Key` header with your configured `API_KEY`.
+- `GET /status` - Service health and status report. Publicly accessible.
+
+All other API endpoints require authentication via the `X-API-Key` header with your configured `API_KEY`.
 
 - `GET /repos` - List user repositories
   - Query parameter: `token` (optional GitHub Personal Access Token)
