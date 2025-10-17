@@ -10,8 +10,8 @@ echo "Starting with UID: $USER_ID, GID: $GROUP_ID"
 groupmod -g $GROUP_ID appuser
 usermod -u $USER_ID -g $GROUP_ID appuser
 
-# Change ownership of the app directory
+# Change ownership of relevant directories
 chown -R appuser:appuser /app
 
-# Execute the command passed to the script
-exec "$@"
+# Drop root privileges and execute the main command as appuser
+exec su-exec appuser "$@"
