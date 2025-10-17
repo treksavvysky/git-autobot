@@ -11,8 +11,7 @@ RUN apt-get update \
 RUN pip install --no-cache-dir uv
 
 COPY requirements.txt .
-RUN uv pip install --system -r requirements.txt [cite: 2]
-
+RUN uv pip install --system -r requirements.txt
 COPY . .
 
 # Create a non-root user with a known home directory
