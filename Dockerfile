@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git su-exec \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir uv
