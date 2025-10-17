@@ -10,8 +10,8 @@ echo "Starting with UID: $USER_ID, GID: $GROUP_ID"
 groupmod -g $GROUP_ID appuser
 usermod -u $USER_ID -g $GROUP_ID appuser
 
-# Change ownership of relevant directories
-chown -R appuser:appuser /app
+# ✅ Change ownership of both the app and home directories
+chown -R appuser:appuser /app /home/appuser
 
-# ✅ Use 'gosu' to drop root privileges
+# Use 'gosu' to drop root privileges
 exec gosu appuser "$@"

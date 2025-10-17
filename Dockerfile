@@ -3,7 +3,6 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# ✅ Install 'gosu' instead of 'su-exec'
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git gosu \
     && rm -rf /var/lib/apt/lists/*
@@ -15,10 +14,12 @@ RUN uv pip install --system -r requirements.txt
 
 COPY . .
 
-# Create a non-root user
-RUN adduser --system --group --uid 1000 appuser
+# ✅ Create a home directory for appuser
+RUN adduser --system --group --uid 1000 --home /home/appuser appuser
 
-# Copy and set up the entrypoint
+# ✅ Set the HOME environment variable
+ENV HOME=/home/appuser
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
