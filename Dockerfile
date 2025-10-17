@@ -3,8 +3,11 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install system dependencies, including su-exec
-RUN apt-get update && apt-get install -y --no-install-recommends git su-exec && rm -rf /var/lib/apt/lists/*
+# ✅ Install 'gosu' instead of 'su-exec'
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git gosu \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir uv
 
 COPY requirements.txt .
@@ -18,8 +21,6 @@ RUN adduser --system --group --uid 1000 appuser
 # Copy and set up the entrypoint
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-
-# The 'USER appuser' line is correctly removed from here.
 
 EXPOSE 8000
 ENV GITHUB_TOKEN=""

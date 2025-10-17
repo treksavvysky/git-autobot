@@ -13,5 +13,5 @@ usermod -u $USER_ID -g $GROUP_ID appuser
 # Change ownership of relevant directories
 chown -R appuser:appuser /app
 
-# Drop root privileges and execute the main command as appuser
-exec su-exec appuser "$@"
+# ✅ Use 'gosu' to drop root privileges
+exec gosu appuser "$@"
